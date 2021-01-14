@@ -1,0 +1,381 @@
+Subject: fp simulator kernel crash, tcsh here doc crash, welcome y2k bug
+Index:	 src/sys/pdp/mch_fpsim.s, src/bin/tcsh/(sh.glob.c,sh.dol.c,sh.decls.h), src/local/welcome/welcome.c
+
+Description:
+	Using the Floating Point simulation will crash the kernel when a
+	signal (SIGTRAP, SIGILL, SIGFPE) needs to be generated.
+
+	tcsh will crash when using a 'here document'.
+
+	There is a year 2000 (y2k) bug in the 'welcome' program.
+
+Repeat-By:
+	1. Have a PDP-11 without floating point harware (but otherwise still
+	capable of running 2.11BSD) and execute a floating point instruction
+	with an invalid opcode (SIGILL), invalid / inaccessible data (SIGSEGV),
+	or (SIGTRAP)
+	
+	The problem is that the signal names created during the kernel
+	build process (by the 'genassym' helper program) have a '.' appended.
+	So the signal name SIGILL (which has the value of 4) is given the 
+	value of 4. 
+	
+	In mch_fpsim.s 
+
+	   This analysis is courtesy of Dr. Walter F.J. Mueller:
+
+	   mov $SIGILL.,r0
+
+	   becomes
+
+	   mov $4..,r0
+
+	the assembler https://wolfram.schneider.org/bsd/7thEdManVol2/assembler/assembler.pdf
+
+	   6.1  Expression  operators. The operators are:
+
+		(blank) when there  is  no  operand  between  operands,
+		the effect is exactly the same as if a + had appeared.
+
+		So the lexer sees two tokens
+
+		$4. --> number
+		.   --> symbol for location counter
+
+		and because the default operator is '+' interprets this as
+
+		mov $4. + . , r0
+
+		which ends up being a number in the 160000 to 177777 range.
+
+		And that causes a crash.
+
+	2. Use a 'here document' and tcsh will crash:
+
+cat <<EOF
+foobar
+EOF
+
+	3. Run the /usr/local/bin/welcome program and see that the year is
+	   malformed
+
+Fix:
+	1. removing the extra '.' at the end of the signal names.
+
+	2. fix was to move the rscan()' function to the same overlay as its
+	   only use.  Since rscan is only used in one place make the function 
+	   'static'.  Also the function Dtestq() was inlined because it was
+	   only used in one place (in rscan).
+	
+	3. Remove the hardcoded '19' in the format string and add 1900 to the
+	   year value.
+
+
+	To apply this patch cut where indicated and save to a file (/tmp/453).
+
+	Then:
+
+	cd /
+	patch -p0 < /tmp/453
+
+	cd /usr/src/bin/tcsh
+	make 
+	make install
+	make clean
+
+	cd /usr/src/local/welcome
+	make
+	make install
+	make clean
+
+	It is only necessary to rebuild the kernel if the system does not
+	have floating point hardware.
+
+	This and previous updates to 2.11BSD are available at the following
+	locations:
+	
+	ftp://ftp.update.uu.se/pub/pdp11/2.11BSD
+	https://www.tuhs.org/Archive/Distributions/UCB/2.11BSD/Patches/
+	ftp://ftp.2bsd.com/2.11BSD
+
+---------------------------cut here--------------------
+*** usr/src/sys/pdp/mch_fpsim.s.old	Tue Dec 26 16:56:08 2006
+--- usr/src/sys/pdp/mch_fpsim.s	Fri Oct 11 12:32:49 2019
+***************
+*** 17,23 ****
+   *	RIGHTS, APPROPRIATE COPYRIGHT LEGENDS MAY BE PLACED ON THE
+   *	DERIVATIVE WORK IN ADDITION TO THAT SET FORTH ABOVE.
+   *
+!  *	@(#)mch_fpsim.s	1.3 (2.11BSD) 2006/12/26
+   */
+  #include "DEFS.h"
+  
+--- 17,23 ----
+   *	RIGHTS, APPROPRIATE COPYRIGHT LEGENDS MAY BE PLACED ON THE
+   *	DERIVATIVE WORK IN ADDITION TO THAT SET FORTH ABOVE.
+   *
+!  *	@(#)mch_fpsim.s	1.4 (2.11BSD) 2019/10/11
+   */
+  #include "DEFS.h"
+  
+***************
+*** 246,260 ****
+  2:
+  	jmp	cret
+  1:
+! 	mov	$SIGTRAP.,r0
+  	br	2b
+  badins:				/ Illegal Instruction
+! 	mov	$SIGILL.,r0
+  	br	2b
+  segfault:			/ Segmentation Violation
+  	mov	uar0,r0		/ Don't update any registers, but
+  	sub	$2,2.(r0)	/ back up the pc to point to the instruction.
+! 	mov	$SIGSEGV.,r0
+  	br	2b
+  fpexcept:			/ Floating Point Exception
+  	/ restore all the new register values, and then
+--- 246,260 ----
+  2:
+  	jmp	cret
+  1:
+! 	mov	$SIGTRAP,r0
+  	br	2b
+  badins:				/ Illegal Instruction
+! 	mov	$SIGILL,r0
+  	br	2b
+  segfault:			/ Segmentation Violation
+  	mov	uar0,r0		/ Don't update any registers, but
+  	sub	$2,2.(r0)	/ back up the pc to point to the instruction.
+! 	mov	$SIGSEGV,r0
+  	br	2b
+  fpexcept:			/ Floating Point Exception
+  	/ restore all the new register values, and then
+***************
+*** 270,276 ****
+  	mov	(r1)+,-6.(r0)	/ sp (r6)
+  	mov	(r1)+,2.(r0)	/ pc (r7)
+  	mov	(r1)+,4.(r0)	/ psw
+! 	mov	$SIGFPE.,r0
+  	jmp	cret
+  
+  freg:
+--- 270,276 ----
+  	mov	(r1)+,-6.(r0)	/ sp (r6)
+  	mov	(r1)+,2.(r0)	/ pc (r7)
+  	mov	(r1)+,4.(r0)	/ psw
+! 	mov	$SIGFPE,r0
+  	jmp	cret
+  
+  freg:
+*** usr/src/bin/tcsh/sh.glob.c.old	Sun Oct  6 17:41:53 1991
+--- usr/src/bin/tcsh/sh.glob.c	Fri Oct 11 13:07:08 2019
+***************
+*** 1,4 ****
+- /* $Header: /home/hyperion/mu/christos/src/sys/tcsh-6.00/RCS/sh.glob.c,v 3.0 1991/07/04 21:49:28 christos Exp $ */
+  /*
+   * sh.glob.c: Regular expression expansion
+   */
+--- 1,3 ----
+***************
+*** 37,43 ****
+  #include "config.h"
+  #if !defined(lint) && !defined(pdp11)
+  static char *rcsid() 
+!     { return "$Id: sh.glob.c,v 3.0 1991/07/04 21:49:28 christos Exp $"; }
+  #endif
+  
+  #include "sh.h"
+--- 36,42 ----
+  #include "config.h"
+  #if !defined(lint) && !defined(pdp11)
+  static char *rcsid() 
+!     { return "$Id: sh.glob.c,v 3.1 2019/10/11 13:06:28 sms Exp $"; }
+  #endif
+  
+  #include "sh.h"
+***************
+*** 530,547 ****
+      gargv = (Char **) xmalloc((size_t) sizeof(Char *) * gargsiz);
+      gargv[0] = 0;
+      gargc = 0;
+- }
+- 
+- void
+- rscan(t, f)
+-     register Char **t;
+-     void    (*f) ();
+- {
+-     register Char *p;
+- 
+-     while (p = *t++)
+- 	while (*p)
+- 	    (*f) (*p++);
+  }
+  
+  void
+--- 529,534 ----
+*** usr/src/bin/tcsh/sh.dol.c.old	Tue Aug 20 14:12:55 1991
+--- usr/src/bin/tcsh/sh.dol.c	Fri Oct 11 12:56:41 2019
+***************
+*** 1,4 ****
+- /* $Header: /home/hyperion/mu/christos/src/sys/tcsh-6.00/RCS/sh.dol.c,v 3.0 1991/07/04 21:49:28 christos Exp $ */
+  /*
+   * sh.dol.c: Variable substitutions
+   */
+--- 1,3 ----
+***************
+*** 37,43 ****
+  #include "config.h"
+  #if !defined(lint) && !defined(pdp11)
+  static char *rcsid() 
+!     { return "$Id: sh.dol.c,v 3.0 1991/07/04 21:49:28 christos Exp $"; }
+  #endif
+  
+  #include "sh.h"
+--- 36,42 ----
+  #include "config.h"
+  #if !defined(lint) && !defined(pdp11)
+  static char *rcsid() 
+!     { return "$Id: sh.dol.c,v 3.1 2019/10/11 12:37:28 sms Exp $"; }
+  #endif
+  
+  #include "sh.h"
+***************
+*** 86,92 ****
+  static	void	 setDolp	__P((Char *));
+  static	void	 unDredc	__P((int));
+  static	int	 Dredc		__P((void));
+- static	void	 Dtestq		__P((int));
+  
+  /*
+   * Fix up the $ expansions and quotations in the
+--- 85,90 ----
+***************
+*** 672,684 ****
+  }
+  
+  static void
+! Dtestq(c)
+!     register int c;
+  {
+  
+!     if (cmap(c, QUOTES))
+! 	gflag = 1;
+! }
+  
+  /*
+   * Form a shell temporary file (in unit 0) from the words
+--- 670,689 ----
+  }
+  
+  static void
+! rscan(t)
+!     register Char **t;
+  {
++     register Char *p, c;
+  
+!     while (p = *t++)
+!           {
+! 	  while (c = *p++)
+!                 {
+!                 if (cmap(c, QUOTES))
+! 	           gflag = 1;
+!                 }
+!           }
+! }
+  
+  /*
+   * Form a shell temporary file (in unit 0) from the words
+***************
+*** 713,719 ****
+      Dv[1] = NOSTR;
+      gflag = 0;
+      trim(Dv);
+!     rscan(Dv, Dtestq);
+      quoted = gflag;
+      ocnt = BUFSIZ;
+      obp = obuf;
+--- 718,724 ----
+      Dv[1] = NOSTR;
+      gflag = 0;
+      trim(Dv);
+!     rscan(Dv);
+      quoted = gflag;
+      ocnt = BUFSIZ;
+      obp = obuf;
+*** usr/src/bin/tcsh/sh.decls.h.old	Tue Aug 20 14:12:53 1991
+--- usr/src/bin/tcsh/sh.decls.h	Fri Oct 11 12:40:56 2019
+***************
+*** 1,5 ****
+- /* $Header: /home/hyperion/mu/christos/src/sys/tcsh-6.00/RCS/sh.decls.h,v 3.0 1991/07/04 23:34:26 christos Exp $ */
+  /*
+   * sh.decls	 External declarations from sh*.c
+   */
+  /*-
+--- 1,7 ----
+  /*
++  *      @(#)sh.decls.h 2.0 (2.11BSD) 2019/10/11
++ */
++ /*
+   * sh.decls	 External declarations from sh*.c
+   */
+  /*-
+***************
+*** 169,175 ****
+  extern	int		  Gmatch	__P((Char *, Char *));
+  extern	void		  ginit		__P((void));
+  extern	Char		**globall	__P((Char **));
+- extern	void		  rscan		__P((Char **, void (*)()));
+  extern	void		  tglob		__P((Char **));
+  extern	void		  trim		__P((Char **));
+  #ifdef FILEC
+--- 171,176 ----
+*** usr/src/local/welcome/welcome.c.old	Sun Feb  5 02:46:27 1995
+--- usr/src/local/welcome/welcome.c	Fri Oct 11 13:04:26 2019
+***************
+*** 1,3 ****
+--- 1,9 ----
++ /*
++  *       welcome program
++  *
++  *      @(#) welcome.c 3.1 (2.11BSD) 2019/10/11
++  */
++ 
+  #include <stdio.h>
+  #include <sys/param.h>
+  #include <sys/sysctl.h>
+***************
+*** 123,130 ****
+  	x = 40 - (strlen(days[det->tm_wday]) / 2);
+  	y = (69 - x);
+  	printf("\033[8;%dH%s", y, days[det->tm_wday]);
+! 	sprintf(bot, "%s %d, 19%d %d:%02d %cM", mons[det->tm_mon],
+! 	        det->tm_mday, det->tm_year, det->tm_hour,
+  		det->tm_min, ap);
+  	a = 40 -(strlen(bot) / 2);
+  	b = (54 - a);
+--- 129,136 ----
+  	x = 40 - (strlen(days[det->tm_wday]) / 2);
+  	y = (69 - x);
+  	printf("\033[8;%dH%s", y, days[det->tm_wday]);
+! 	sprintf(bot, "%s %d, %d %d:%02d %cM", mons[det->tm_mon],
+! 	        det->tm_mday, det->tm_year+1900, det->tm_hour,
+  		det->tm_min, ap);
+  	a = 40 -(strlen(bot) / 2);
+  	b = (54 - a);
+*** VERSION.old	Sat Apr 27 08:42:59 2019
+--- VERSION	Fri Oct 11 12:34:04 2019
+***************
+*** 1,5 ****
+! Current Patch Level: 452
+! Date: April 27, 2019
+  
+  2.11 BSD
+  ============
+--- 1,5 ----
+! Current Patch Level: 453
+! Date: October 11, 2019
+  
+  2.11 BSD
+  ============

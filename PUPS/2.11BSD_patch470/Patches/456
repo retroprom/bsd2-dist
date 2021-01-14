@@ -1,0 +1,538 @@
+Subject: filesystem clean
+Index:	 src/sys/sys/{ufs_mount,ufs_subr.c} src/sys/pdp/machdep2.c src/sys/h/mount.h src/sbin/fsck src/man/man8/fsck.8
+
+Description:
+	Large capacity disks take a very long time for fsck to verify the
+	integrity of the filesystems.
+
+Repeat-By:
+	Have large filesystems present and perform a 'reboot'.  Observe that
+	fsck can take a very long time for the larger filesystems
+	
+Fix:
+	This patch implements a 'filesystem clean' flag.  When a filesystem
+	is clean and unmounted successfully the superblock is updated with
+	the 'clean flag' set.  
+
+	When fsck sees the 'clean flag' it will, unless the -f flag is used,
+	skip checking the filesystem.
+
+	This patch is courtesy of Johnny Billquist (bqt@softjar.se).
+
+	NOTE: A kernel recompile, install and reboot is part of this patch!
+
+	      If you maintain a copy of the generic kernel (in /genunix for
+	      example then rebuild and install /genunix)
+
+	WARNING: A small amount of code is added in ufs_subr.c and
+	      ufs_mount.c - this  MAY affect the overlay layout.
+
+	Cut where indicated and save to a file (/tmp/456.patch).  Then:
+
+cd /usr/src/man/man8
+/usr/man/manroff fsck.8 > fsck.0
+install -c -o bin -g bin -m 444 fsck.0 /usr/man/cat8
+rm -f fsck.0
+
+cd /usr/src/sbin/fsck
+make
+make install
+make clean
+
+cd /sys/<YOUR_KERNEL>
+make
+# optionally save the old kernel and networking
+#mv /unix /ounix
+#mv /netnix /onetnix
+install -c -o root -g wheel -m 744 unix /unix
+install -c -o root -g wheel -m 744 netnix /netnix
+make clean
+
+# optional
+#cd /sys/GENERIC
+#make 
+#install -c -o root -g wheel -m 744 unix /genunix
+#make clean
+
+reboot
+
+	The first time you run fsck after booting you must halt the system
+	without sync!  This sets the clean flag on the root filesystem
+
+	After the first fsck and reboot the clean flag will be used to avoid
+	checking filesystems that were cleanly unmounted.
+
+	This and previous updates to 2.11BSD are available at the following
+	locations:
+	
+	ftp://ftp.update.uu.se/pub/pdp11/2.11BSD
+	https://www.tuhs.org/Archive/Distributions/UCB/2.11BSD/Patches/
+	ftp://ftp.2bsd.com/2.11BSD
+
+---------------------------cut here--------------------
+*** usr/src/man/man8/fsck.8.old	Sun Nov 17 22:48:06 1996
+--- usr/src/man/man8/fsck.8	Mon Nov 18 07:47:21 2019
+***************
+*** 7,13 ****
+  fsck \- file system consistency check and interactive repair
+  .SH SYNOPSIS
+  .B fsck
+! .BR \-p "[ # ]"
+  [
+  filesystem ...
+  ]
+--- 7,13 ----
+  fsck \- file system consistency check and interactive repair
+  .SH SYNOPSIS
+  .B fsck
+! .BR \-p "[ # ] [ -f ]"
+  [
+  filesystem ...
+  ]
+***************
+*** 18,23 ****
+--- 18,25 ----
+  ] [
+  .B \-n
+  ] [
++ .B \-f
++ ] [
+  .BR \-s X
+  ] [
+  .BR \-S X
+***************
+*** 146,151 ****
+--- 148,156 ----
+  Assume a no response to all questions asked by 
+  .I fsck;
+  do not open the file system for writing.
++ .TP 6
++ .B  \-\^f
++ Force checking of file system, even if it is marked clean.
+  .TP 6
+  .BR \-\^s \fIX
+  Ignore the actual free list and (unconditionally) reconstruct a new
+*** usr/src/sbin/fsck/fsck.h.old	Thu Apr 26 12:34:21 1990
+--- usr/src/sbin/fsck/fsck.h	Mon Nov 18 07:54:42 2019
+***************
+*** 3,9 ****
+   * All rights reserved.  The Berkeley software License Agreement
+   * specifies the terms and conditions for redistribution.
+   *
+!  *	@(#)fsck.h	5.1 (Berkeley) 6/5/85
+   */
+  
+  #define	MAXDUP		10	/* limit on dup blks (per inode) */
+--- 3,9 ----
+   * All rights reserved.  The Berkeley software License Agreement
+   * specifies the terms and conditions for redistribution.
+   *
+!  *	@(#)fsck.h	5.2 (2.11BSD) 2019/11/18 
+   */
+  
+  #define	MAXDUP		10	/* limit on dup blks (per inode) */
+***************
+*** 155,160 ****
+--- 155,162 ----
+  char	sflag;			/* rebuild free list */
+  int	debug;			/* output debugging info */
+  char	preen;			/* just fix normal inconsistencies */
++ char	fflag;			/* force check on clean file system */
++ char	noflag;			/* flag is we answered any question with no */
+  char	hotroot;		/* checking root device */
+  char	fixfree;		/* force rebuild of freelist */
+  char	*membase;		/* base of memory we get */
+*** usr/src/sbin/fsck/main.c.old	Sat Feb  3 23:42:38 1996
+--- usr/src/sbin/fsck/main.c	Mon Nov 18 07:55:23 2019
+***************
+*** 9,20 ****
+  "@(#) Copyright (c) 1980 Regents of the University of California.\n\
+   All rights reserved.\n";
+  
+! static char sccsid[] = "@(#)main.c	5.4.1 (2.11BSD) 1996/2/3";
+  #endif not lint
+  
+  #include <sys/param.h>
+  #include <sys/inode.h>
+  #include <sys/fs.h>
+  #include <sys/stat.h>
+  #include <sys/wait.h>
+  #include <fstab.h>
+--- 9,21 ----
+  "@(#) Copyright (c) 1980 Regents of the University of California.\n\
+   All rights reserved.\n";
+  
+! static char sccsid[] = "@(#)main.c	5.5 (2.11BSD) 2019/11/18";
+  #endif not lint
+  
+  #include <sys/param.h>
+  #include <sys/inode.h>
+  #include <sys/fs.h>
++ #include <sys/mount.h>
+  #include <sys/stat.h>
+  #include <sys/wait.h>
+  #include <fstab.h>
+***************
+*** 60,65 ****
+--- 61,70 ----
+  			preen++;
+  			break;
+  
++ 		case 'f':	/* force check */
++ 			fflag++;
++ 			break;
++ 
+  		case 'd':
+  			debug++;
+  			break;
+***************
+*** 168,180 ****
+  {
+  	daddr_t n_ffree, n_bfree;
+  	register ino_t *zp;
+  
+  	devname = filesys;
+! 	if (setup(filesys) == 0) {
+  		if (preen)
+  			pfatal("CAN'T CHECK FILE SYSTEM.");
+  		return;
+  	}
+  	/*
+  	 * 1: scan inodes tallying blocks used
+  	 */
+--- 173,191 ----
+  {
+  	daddr_t n_ffree, n_bfree;
+  	register ino_t *zp;
++ 	int i;
+  
+  	devname = filesys;
+! 	if ((i = setup(filesys)) == 0) {
+  		if (preen)
+  			pfatal("CAN'T CHECK FILE SYSTEM.");
+  		return;
+  	}
++ 	if (i<0) {
++ 		pwarn("%sile system is clean; not checking\n", preen ? "f" : "** F");
++ 		return;
++ 	}
++ 
+  	/*
+  	 * 1: scan inodes tallying blocks used
+  	 */
+***************
+*** 252,261 ****
+--- 263,292 ----
+  	}
+  	bzero(zlnlist, sizeof zlnlist);
+  	bzero(duplist, sizeof duplist);
++ 
+  	if (dfile.mod) {
+  		(void)time(&sblock.fs_time);
+  		sbdirty();
+  	}
++ 
++ 	/* If the superblock wasn't marked clean, we'll
++ 	 * mark it clean now, and update it.
++ 	 *
++ 	 * Note: The root filesystem is special, since it
++ 	 *       is already mounted (hotroot). For this one
++ 	 *       we instead look at WASCLEAN, since it reflect
++ 	 *       the clean status at mount time.
++ 	 */
++ 	if ((sblock.fs_flags & MNT_CLEAN) == 0) {
++ 		if (!(hotroot && (sblock.fs_flags & MNT_WASCLEAN))) {
++ 			if (!noflag) {
++ 				pwarn("Marking file system clean\n");
++ 				sblock.fs_flags |= MNT_CLEAN|MNT_WASCLEAN;
++ 				sbdirty();
++ 			}
++ 		}
++ 	}
++ 
+  	ckfini();
+  	if (!dfile.mod)
+  		return;
+*** usr/src/sbin/fsck/setup.c.old	Sat Feb  3 23:46:25 1996
+--- usr/src/sbin/fsck/setup.c	Mon Nov 18 07:55:41 2019
+***************
+*** 5,11 ****
+   */
+  
+  #if	!defined(lint) && defined(DOSCCS)
+! static char sccsid[] = "@(#)setup.c	5.3.1 (2.11BSD) 1996/2/3";
+  #endif not lint
+  
+  #include <stdio.h>
+--- 5,11 ----
+   */
+  
+  #if	!defined(lint) && defined(DOSCCS)
+! static char sccsid[] = "@(#)setup.c	5.4 (2.11BSD) 2019/11/18";
+  #endif not lint
+  
+  #include <stdio.h>
+***************
+*** 14,19 ****
+--- 14,20 ----
+  #include <sys/inode.h>
+  #include <sys/fs.h>
+  #include <sys/stat.h>
++ #include <sys/mount.h>
+  #include "fsck.h"
+  
+  setup(dev)
+***************
+*** 158,163 ****
+--- 159,169 ----
+  		statemap = &mbase[bmapsz];
+  		freemap = statemap;
+  		lncntp = (short *)&statemap[smapsz];
++ 	}
++ 
++ 	if (!fflag) {
++ 		if (sblock.fs_flags & MNT_CLEAN) return(-1);
++ 		if (hotroot && (sblock.fs_flags & MNT_WASCLEAN)) return(-1);
+  	}
+  	return(1);
+  }
+*** usr/src/sbin/fsck/utilities.c.old	Sat Sep 15 22:19:09 1990
+--- usr/src/sbin/fsck/utilities.c	Mon Nov 18 07:56:32 2019
+***************
+*** 5,11 ****
+   */
+  
+  #if	!defined(lint) && defined(DOSCCS)
+! static char sccsid[] = "@(#)utilities.c	5.2 (Berkeley) 9/10/85";
+  #endif not lint
+  
+  #include <stdio.h>
+--- 5,11 ----
+   */
+  
+  #if	!defined(lint) && defined(DOSCCS)
+! static char sccsid[] = "@(#)utilities.c	5.3 (2.11BSD) 2019/11/18";
+  #endif not lint
+  
+  #include <stdio.h>
+***************
+*** 48,53 ****
+--- 48,54 ----
+  	printf("\n%s? ", s);
+  	if (nflag || dfile.wfdes < 0) {
+  		printf(" no\n\n");
++ 		noflag = 1;
+  		return (0);
+  	}
+  	if (yflag) {
+***************
+*** 59,66 ****
+  	printf("\n");
+  	if (line[0] == 'y' || line[0] == 'Y')
+  		return (1);
+! 	else
+! 		return (0);
+  }
+  
+  getline(fp, loc, maxlen)
+--- 60,67 ----
+  	printf("\n");
+  	if (line[0] == 'y' || line[0] == 'Y')
+  		return (1);
+! 	noflag = 1;
+! 	return (0);
+  }
+  
+  getline(fp, loc, maxlen)
+*** usr/src/sys/h/mount.h.old	Sun Jun 29 16:47:54 1997
+--- usr/src/sys/h/mount.h	Mon Nov 18 07:57:12 2019
+***************
+*** 3,9 ****
+   * All rights reserved.  The Berkeley software License Agreement
+   * specifies the terms and conditions for redistribution.
+   *
+!  *	@(#)mount.h	7.2.5 (2.11BSD GTE) 1997/6/29
+   */
+  
+  /*
+--- 3,9 ----
+   * All rights reserved.  The Berkeley software License Agreement
+   * specifies the terms and conditions for redistribution.
+   *
+!  *	@(#)mount.h	7.3 (2.11BSD) 2019/11/18
+   */
+  
+  /*
+***************
+*** 90,95 ****
+--- 90,97 ----
+   * support will never be a problem we can avoid making the flags into a 'long.
+  */
+  #define	MNT_UPDATE	0x1000		/* not a real mount, just an update */
++ #define MNT_CLEAN	0x2000		/* file system is clean */
++ #define MNT_WASCLEAN	0x4000		/* file system was clean at mount */
+  
+  /*
+   * Flags for various system call interfaces.
+*** usr/src/sys/pdp/machdep2.c.old	Sun Jul 25 23:19:26 1999
+--- usr/src/sys/pdp/machdep2.c	Mon Nov 18 07:59:08 2019
+***************
+*** 3,9 ****
+   * All rights reserved.  The Berkeley software License Agreement
+   * specifies the terms and conditions for redistribution.
+   *
+!  *	@(#)machdep2.c	2.9 (2.11BSD) 1999/2/19
+   */
+  
+  #include "param.h"
+--- 3,9 ----
+   * All rights reserved.  The Berkeley software License Agreement
+   * specifies the terms and conditions for redistribution.
+   *
+!  *	@(#)machdep2.c	2.10 (2.11BSD) 2019/11/18
+   */
+  
+  #include "param.h"
+***************
+*** 411,416 ****
+--- 411,417 ----
+  		  }
+  		}
+  		printf("done\n");
++ 		fsclean();
+  	}
+  	(void) _splhigh();
+  	if (howto & RB_HALT) {
+*** usr/src/sys/sys/ufs_mount.c.old	Sun Jun 29 18:27:23 1997
+--- usr/src/sys/sys/ufs_mount.c	Mon Nov 18 07:59:50 2019
+***************
+*** 3,9 ****
+   * All rights reserved.  The Berkeley software License Agreement
+   * specifies the terms and conditions for redistribution.
+   *
+!  *	@(#)ufs_mount.c	2.1 (2.11BSD GTE) 1997/6/29
+   */
+  
+  #include "param.h"
+--- 3,9 ----
+   * All rights reserved.  The Berkeley software License Agreement
+   * specifies the terms and conditions for redistribution.
+   *
+!  *	@(#)ufs_mount.c	2.2 (2.11BSD) 2019/11/18
+   */
+  
+  #include "param.h"
+***************
+*** 228,233 ****
+--- 228,234 ----
+  	fs->fs_flock = 0;
+  	fs->fs_nbehind = 0;
+  	fs->fs_lasti = 1;
++ 	if (fs->fs_flags & MNT_CLEAN) flags |= MNT_WASCLEAN;
+  	fs->fs_flags = flags;
+  	if (ip) {
+  		ip->i_flag |= IMOUNT;
+***************
+*** 234,239 ****
+--- 235,241 ----
+  		cacheinval(ip);
+  		IUNLOCK(ip);
+  	}
++ 	if (fs->fs_fmod) ufs_sync(mp);
+  	return (fs);
+  out:
+  	if (error == 0)
+***************
+*** 283,288 ****
+--- 285,300 ----
+  	nchinval(dev);	/* flush the name cache */
+  	aflag = mp->m_flags & MNT_ASYNC;
+  	mp->m_flags &= ~MNT_ASYNC;	/* Don't want async when unmounting */
++ 
++ 	if ((mp->m_flags & MNT_RDONLY) == 0) {
++ 		struct fs *fs;
++ 		fs = &mp->m_filsys;
++ 		if (fs->fs_flags & MNT_WASCLEAN) {
++ 		  fs->fs_fmod = 1;		/* SB update needed */
++ 		  fs->fs_flags |= MNT_CLEAN;	/* File system is now clean */
++ 		}
++ 	}
++ 
+  	ufs_sync(mp);
+  
+  #ifdef QUOTA
+*** usr/src/sys/sys/ufs_subr.c.old	Mon Sep 16 23:08:51 1996
+--- usr/src/sys/sys/ufs_subr.c	Mon Nov 18 08:00:48 2019
+***************
+*** 3,9 ****
+   * All rights reserved.  The Berkeley software License Agreement
+   * specifies the terms and conditions for redistribution.
+   *
+!  *	@(#)ufs_subr.c	1.5 (2.11BSD GTE) 1996/9/13
+   */
+  
+  #include "param.h"
+--- 3,9 ----
+   * All rights reserved.  The Berkeley software License Agreement
+   * specifies the terms and conditions for redistribution.
+   *
+!  *	@(#)ufs_subr.c	1.6 (2.11BSD) 2019/11/18
+   */
+  
+  #include "param.h"
+***************
+*** 43,48 ****
+--- 43,80 ----
+  		mp->m_flags &= ~MNT_ASYNC;
+  		ufs_sync(mp);
+  		mp->m_flags |= async;
++ 		}
++ 	updlock = 0;
++ 	}
++ 
++ /*
++  * Go through the mount table marking filesystems clean.
++  */
++ fsclean()
++ {
++ 	register struct mount *mp;
++ 	register struct fs *fs;
++ 	int async;
++ 
++ 	if	(updlock)
++ 		return;
++ 	updlock++;
++ 	for	(mp = &mount[0]; mp < &mount[NMOUNT]; mp++)
++ 		{
++ 		if	(mp->m_inodp == NULL || mp->m_dev == NODEV)
++ 			continue;
++ 		fs = &mp->m_filsys;
++ 		if	(fs->fs_ronly == 1 || fs->fs_ilock || fs->fs_flock)
++ 			continue;
++ 		if (fs->fs_flags & MNT_WASCLEAN) {
++ 			async = mp->m_flags & MNT_ASYNC;
++ 			mp->m_flags &= ~MNT_ASYNC;
++ 			fs->fs_flags |= MNT_CLEAN;
++ 			fs->fs_fmod = 1;
++ 			ufs_sync(mp);
++ 			fs->fs_flags &= ~MNT_CLEAN;
++ 			mp->m_flags |= async;
++ 		    }
+  		}
+  	updlock = 0;
+  	}
+*** VERSION.old	Tue Oct 29 07:57:20 2019
+--- VERSION	Mon Nov 18 07:53:08 2019
+***************
+*** 1,5 ****
+! Current Patch Level: 455
+! Date: October 29, 2019
+  
+  2.11 BSD
+  ============
+--- 1,5 ----
+! Current Patch Level: 456
+! Date: November 18, 2019
+  
+  2.11 BSD
+  ============

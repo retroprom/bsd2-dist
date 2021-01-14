@@ -1,0 +1,1762 @@
+Subject: srandom(3) and initstate(3) incorrect input argument
+Index:	 
+
+Description:
+	random(3) is defined, in stdlib.h,  as returning a 32 bit random 
+	number in random(3):
+
+		long random()
+
+	but the arguments to the seeding and initial state functions are
+	incorrectly, in random.c,  declared as 16 bits:
+
+		srandom(seed)
+		int seed;
+
+		char *initstate(seed, state, n)
+		unsigned seed;
+		char *state;
+		int n;
+
+Repeat-By:
+	Observation or by playing games (mille(6) was the one I was playing).
+
+	In addition to games (which are the primary users of random(3)) several
+	other programs and libraries in the system are affected:
+
+	passwd(1), libF77, identd, and of course the lint libraries
+
+Fix:
+	A file is obsoleted by this patch and is removed from the system.  If
+	you wish to retain the file make a copy of /usr/src/games/fortune/rnd.c
+	before proceeding.
+
+	Cut where indicated and save to the temporary file /tmp/452.  Then 
+	unpack the shar file to the remove script and diffs file:
+
+	cd /tmp
+	sh 452
+	patch -p0 < /tmp/452
+
+	First run the script to remove the obsoleted file (or manually issue
+	the 'rm' command ;)):
+
+	sh /tmp/452-rm
+
+	Next apply the patches:
+
+	cd /
+	patch -p0 < /tmp/452-patch
+
+	Because a function in libc is being changed the library is updated:
+
+----
+cd /usr/src/lib/libc/gen
+cc -p -O -c random.c
+ld -X -r random.o
+mv a.out profiled/random.o
+cc -O -c random.c
+ld -X -r random.o
+mv a.out random.o
+ar rv /lib/libc.a random.o
+ranlib /lib/libc.a
+ar rv /usr/lib/libc_p.a profiled/random.o
+ranlib /usr/lib/libc_p.a
+----
+
+	Next rebuild the manpage for random(3), initstate(3) and srandom(3):
+
+----
+cd /usr/src/man/man3
+make random.0
+install -c -o bin -g bin -m 444 random.0 /usr/man/cat3/random.0
+rm -f /usr/man/cat3/initstate.0 /usr/man/cat3/setstate.0 /usr/man/cat3/srandom.0
+ln /usr/man/cat3/random.0 /usr/man/cat3/initstate.0
+ln /usr/man/cat3/random.0 /usr/man/cat3/setstate.0
+ln /usr/man/cat3/random.0 /usr/man/cat3/srandom.0
+make clean
+----
+
+	The build process for libF77 is more complicated so rather than 
+	manually enter the many commands necessary the simpler but longer
+	running method is used:
+
+----
+cd /usr/src/usr.lib/libF77
+make
+make install
+make clean
+----
+
+	Next the lint libraries:
+
+-----
+cd /usr/src/share/lint
+make
+make install
+make clean
+-----
+
+	And finally the affected programs.  Do not worry about atc(6) - the
+	port to 2.11 was never completed:
+
+----
+cd /usr/src/games/fortune
+make 
+make install
+make clean
+
+cd /usr/src/games/backgammon
+make
+make install
+make clean
+
+cd /usr/src/games/mille
+make
+make install
+make clean
+
+cd /usr/src/bin/passwd
+make 
+make install
+
+cd /usr/src/libexec/identd
+make
+make install
+make clean
+----
+
+	This and previous updates to 2.11BSD are available at the following
+	locations:
+	
+	ftp://ftp.update.uu.se/pub/pdp11/2.11BSD
+	https://www.tuhs.org/Archive/Distributions/UCB/2.11BSD/Patches/
+	ftp://ftp.2bsd.com/2.11BSD
+
+---------------------------cut here--------------------
+#! /bin/sh
+# This is a shell archive, meaning:
+# 1. Remove everything above the #! /bin/sh line.
+# 2. Save the resulting text in a file.
+# 3. Execute the file with /bin/sh (not csh) to create:
+#	452-rm
+#	452-diffs
+# This archive created: Thu Oct 10 10:54:52 2019
+export PATH; PATH=/bin:/usr/bin:$PATH
+if test -f '452-rm'
+then
+	echo shar: "will not over-write existing file '452-rm'"
+else
+sed 's/^X//' << \SHAR_EOF > '452-rm'
+X#!/bin/sh
+X
+Xrm usr/src/games/fortune/rnd.c
+SHAR_EOF
+chmod +x '452-rm'
+fi
+if test -f '452-diffs'
+then
+	echo shar: "will not over-write existing file '452-diffs'"
+else
+sed 's/^X//' << \SHAR_EOF > '452-diffs'
+X*** usr/src/bin/passwd/passwd.c.old	Mon May 15 00:12:14 1989
+X--- usr/src/bin/passwd/passwd.c	Tue Dec 25 08:49:41 2018
+X***************
+X*** 22,28 ****
+X  #endif /* not lint */
+X  
+X  #ifndef lint
+X! static char sccsid[] = "@(#)passwd.c	4.35 (Berkeley) 3/16/89";
+X  #endif /* not lint */
+X  
+X  #include <sys/param.h>
+X--- 22,28 ----
+X  #endif /* not lint */
+X  
+X  #ifndef lint
+X! static char sccsid[] = "@(#)passwd.c	4.36 (2.11BSD) 12/25/2018";
+X  #endif /* not lint */
+X  
+X  #include <sys/param.h>
+X***************
+X*** 35,40 ****
+X--- 35,41 ----
+X  #include <stdio.h>
+X  #include <ctype.h>
+X  #include <strings.h>
+X+ #include <stdlib.h>
+X  
+X  uid_t uid;
+X  
+X***************
+X*** 245,251 ****
+X  		printf("Mismatch; try again, EOF to quit.\n");
+X  	}
+X  	/* grab a random printable character that isn't a colon */
+X! 	(void)srandom((int)time((time_t *)NULL));
+X  	while ((salt[0] = random() % 93 + 33) == ':');
+X  	while ((salt[1] = random() % 93 + 33) == ':');
+X  	return(crypt(buf, salt));
+X--- 246,252 ----
+X  		printf("Mismatch; try again, EOF to quit.\n");
+X  	}
+X  	/* grab a random printable character that isn't a colon */
+X! 	srandom(time((time_t *)NULL));
+X  	while ((salt[0] = random() % 93 + 33) == ':');
+X  	while ((salt[1] = random() % 93 + 33) == ':');
+X  	return(crypt(buf, salt));
+X*** usr/src/games/fortune/fortune.c.old	Thu Jan  9 20:25:25 1986
+X--- usr/src/games/fortune/fortune.c	Sat Dec 29 10:38:21 2018
+X***************
+X*** 1,25 ****
+X! /* $Header: fortune.c,v 1.10 85/11/01 15:19:49 arnold Exp $ */
+X  
+X! # include	<sys/types.h>
+X! # include	<stdio.h>
+X! # include	<sys/file.h>
+X! # include	"strfile.h"
+X  
+X- # define	TRUE	1
+X- # define	FALSE	0
+X- # define	bool	short
+X- 
+X  # define	MINW	6		/* minimum wait if desired */
+X  # define	CPERS	20		/* # of chars for each sec */
+X  # define	SLEN	160		/* # of chars in short fortune */
+X  
+X! # define	FORTFILE	"/usr/games/lib/fortunes.dat"
+X  
+X! bool	Wflag		= FALSE,	/* wait desired after fortune */
+X! 	Sflag		= FALSE,	/* short fortune desired */
+X! 	Lflag		= FALSE,	/* long fortune desired */
+X! 	Oflag		= FALSE,	/* offensive fortunes only */
+X! 	Aflag		= FALSE;	/* any fortune allowed */
+X  
+X  char	*Fortfile	= FORTFILE,	/* fortune database */
+X  	*Usage[]	= {
+X--- 1,23 ----
+X! /* @(#)fortune.c 2.0 (2.11BSD) 2018/12/29 */
+X  
+X! #include	<sys/types.h>
+X! #include	<stdio.h>
+X! #include	<sys/file.h>
+X! #include	<time.h>
+X! #include	<stdlib.h>
+X! #include	"strfile.h"
+X  
+X  # define	MINW	6		/* minimum wait if desired */
+X  # define	CPERS	20		/* # of chars for each sec */
+X  # define	SLEN	160		/* # of chars in short fortune */
+X  
+X! #define	FORTFILE	"/usr/games/lib/fortunes.dat"
+X  
+X! short	Wflag		= 0,	/* wait desired after fortune */
+X! 	Sflag		= 0,	/* short fortune desired */
+X! 	Lflag		= 0,	/* long fortune desired */
+X! 	Oflag		= 0,	/* offensive fortunes only */
+X! 	Aflag		= 0;	/* any fortune allowed */
+X  
+X  char	*Fortfile	= FORTFILE,	/* fortune database */
+X  	*Usage[]	= {
+X***************
+X*** 182,190 ****
+X  					 * few numbers to avoid any non-
+X  					 * randomness in startup
+X  					 */
+X! 					srnd(time(NULL) + getpid());
+X  					for (j = 0; j < 20; j++)
+X! 						(void) rnd(100);
+X  					break;
+X  				  default:
+X  					printf("unknown flag: '%c'\n", *sp);
+X--- 180,188 ----
+X  					 * few numbers to avoid any non-
+X  					 * randomness in startup
+X  					 */
+X! 					srandom(time(NULL) + getpid());
+X  					for (j = 0; j < 20; j++)
+X! 						(void) random();
+X  					break;
+X  				  default:
+X  					printf("unknown flag: '%c'\n", *sp);
+X***************
+X*** 216,222 ****
+X  		Tbl.str_delims[2] = Tbl.str_delims[0];
+X  
+X  	if (Aflag) {
+X! 		if (rnd(Tbl.str_numstr) < Tbl.str_delims[0])
+X  			fortune = Tbl.str_delims[1]++;
+X  		else
+X  			fortune = Tbl.str_delims[2]++;
+X--- 214,220 ----
+X  		Tbl.str_delims[2] = Tbl.str_delims[0];
+X  
+X  	if (Aflag) {
+X! 		if ((random() % Tbl.str_numstr) < Tbl.str_delims[0])
+X  			fortune = Tbl.str_delims[1]++;
+X  		else
+X  			fortune = Tbl.str_delims[2]++;
+X*** usr/src/games/fortune/Makefile.old	Wed Feb 25 21:19:10 1987
+X--- usr/src/games/fortune/Makefile	Sat Dec 29 09:40:22 2018
+X***************
+X*** 1,5 ****
+X  FORTUNES=	scene obscene
+X! SOURCE=		fortune.c strfile.h strfile.c rnd.c unstr.c $(FORTUNES)
+X  TFILES=		Troff.mac Troff.sed Do_troff
+X  LIBDIR=		/usr/games/lib
+X  BINDIR=		/usr/games
+X--- 1,6 ----
+X+ # @(#)Makefile 2.0 (2.11BSD) 2018/12/29
+X  FORTUNES=	scene obscene
+X! SOURCE=		fortune.c strfile.h strfile.c unstr.c $(FORTUNES)
+X  TFILES=		Troff.mac Troff.sed Do_troff
+X  LIBDIR=		/usr/games/lib
+X  BINDIR=		/usr/games
+X***************
+X*** 15,25 ****
+X  
+X  all: fortune strfile unstr fortunes.dat
+X  
+X! fortune: fortune.o rnd.o
+X! 	$(CC) ${SEPFLAG} $(CFLAGS) -o fortune fortune.o rnd.o
+X  
+X! strfile: strfile.o rnd.o
+X! 	$(CC) ${SEPFLAG} $(CFLAGS) -o strfile strfile.o rnd.o
+X  
+X  unstr: unstr.o
+X  	$(CC) ${SEPFLAG} $(CFLAGS) -o unstr unstr.o
+X--- 16,26 ----
+X  
+X  all: fortune strfile unstr fortunes.dat
+X  
+X! fortune: fortune.o
+X! 	$(CC) ${SEPFLAG} $(CFLAGS) -o fortune fortune.o
+X  
+X! strfile: strfile.o
+X! 	$(CC) ${SEPFLAG} $(CFLAGS) -o strfile strfile.o
+X  
+X  unstr: unstr.o
+X  	$(CC) ${SEPFLAG} $(CFLAGS) -o unstr unstr.o
+X***************
+X*** 35,42 ****
+X  	cat obscene >> fortunes
+X  
+X  lint:
+X! 	lint -hxb $(DEFS) fortune.c rnd.c 2>&1 > fortune.lint
+X! 	lint -hxb $(DEFS) strfile.c rnd.c 2>&1 > strfile.lint
+X  	lint -hxb $(DEFS) unstr.c 2>&1 > unstr.lint
+X  
+X  install: all install.data
+X--- 36,43 ----
+X  	cat obscene >> fortunes
+X  
+X  lint:
+X! 	lint -hxb $(DEFS) fortune.c 2>&1 > fortune.lint
+X! 	lint -hxb $(DEFS) strfile.c 2>&1 > strfile.lint
+X  	lint -hxb $(DEFS) unstr.c 2>&1 > unstr.lint
+X  
+X  install: all install.data
+X*** usr/src/games/fortune/strfile.c.old	Thu Jan  9 20:25:26 1986
+X--- usr/src/games/fortune/strfile.c	Sat Dec 29 10:49:27 2018
+X***************
+X*** 1,7 ****
+X! # include	<stdio.h>
+X! # include	<ctype.h>
+X! # include	"strfile.h"
+X  
+X  /*
+X   *	This program takes a file composed of strings seperated by
+X   * lines starting with two consecutive delimiting character (default
+X--- 1,12 ----
+X! /* @(#)strfile.c 2.0 (2.11BSD) 2018/12/29 */
+X  
+X+ #include	<stdio.h>
+X+ #include	<ctype.h>
+X+ #include	<stdlib.h>
+X+ #include	<unistd.h>
+X+ #include 	<time.h>
+X+ #include	"strfile.h"
+X+ 
+X  /*
+X   *	This program takes a file composed of strings seperated by
+X   * lines starting with two consecutive delimiting character (default
+X***************
+X*** 31,39 ****
+X   *	Added ordering options.
+X   */
+X  
+X- # define	TRUE	1
+X- # define	FALSE	0
+X- 
+X  # define	DELIM_CH	'-'
+X  
+X  typedef struct {
+X--- 36,41 ----
+X***************
+X*** 57,66 ****
+X  	NULL
+X  	};
+X  
+X! int	Sflag		= FALSE;	/* silent run flag */
+X! int	Oflag		= FALSE;	/* ordering flag */
+X! int	Iflag		= FALSE;	/* ignore case flag */
+X! int	Rflag		= FALSE;	/* randomize order flag */
+X  int	Delim		= 0;		/* current delimiter number */
+X  
+X  long	*Seekpts;
+X--- 59,68 ----
+X  	NULL
+X  	};
+X  
+X! int	Sflag		= 0;	/* silent run flag */
+X! int	Oflag		= 0;	/* ordering flag */
+X! int	Iflag		= 0;	/* ignore case flag */
+X! int	Rflag		= 0;	/* randomize order flag */
+X  int	Delim		= 0;		/* current delimiter number */
+X  
+X  long	*Seekpts;
+X***************
+X*** 71,80 ****
+X  
+X  STR	*Firstch;			/* first chars of each string */
+X  
+X- char	*fgets(), *malloc(), *strcpy(), *strcat();
+X- 
+X- long	ftell();
+X- 
+X  main(ac, av)
+X  int	ac;
+X  char	**av;
+X--- 73,78 ----
+X***************
+X*** 81,92 ****
+X  {
+X  	register char		*sp, dc;
+X  	register long		*lp;
+X! 	register unsigned int	curseek;	/* number of strings */
+X! 	register long		*seekpts, li;	/* table of seek pointers */
+X! 	register FILE		*inf, *outf;
+X! 	register int		first;
+X! 	register char		*nsp;
+X! 	register STR		*fp;
+X  	static char		string[257];
+X  
+X  	getargs(ac, av);		/* evalute arguments */
+X--- 79,90 ----
+X  {
+X  	register char		*sp, dc;
+X  	register long		*lp;
+X! 	unsigned int	curseek;	/* number of strings */
+X! 	long		*seekpts, li;	/* table of seek pointers */
+X! 	FILE		*inf, *outf;
+X! 	int		first;
+X! 	char		*nsp;
+X! 	STR		*fp;
+X  	static char		string[257];
+X  
+X  	getargs(ac, av);		/* evalute arguments */
+X***************
+X*** 170,176 ****
+X  					fp->first = *nsp;
+X  				fp->pos = *lp;
+X  				fp++;
+X! 				first = FALSE;
+X  			}
+X  			fputs(sp, outf);
+X  		}
+X--- 168,174 ----
+X  					fp->first = *nsp;
+X  				fp->pos = *lp;
+X  				fp++;
+X! 				first = 0;
+X  			}
+X  			fputs(sp, outf);
+X  		}
+X***************
+X*** 284,291 ****
+X   *	Order the strings alphabetically (possibly ignoring case).
+X   */
+X  do_order(seekpts, outf)
+X! long	*seekpts;
+X! FILE	*outf;
+X  {
+X  	register int	i;
+X  	register long	*lp;
+X--- 282,289 ----
+X   *	Order the strings alphabetically (possibly ignoring case).
+X   */
+X  do_order(seekpts, outf)
+X! 	long	*seekpts;
+X! 	FILE	*outf;
+X  {
+X  	register int	i;
+X  	register long	*lp;
+X***************
+X*** 351,365 ****
+X   *	randomization is done within each block.
+X   */
+X  randomize(seekpts)
+X! register long	*seekpts;
+X  {
+X! 	register int	cnt, i, j, start;
+X! 	register long	tmp;
+X! 	register long	*origsp;
+X  
+X  	Tbl.str_flags |= STR_RANDOM;
+X! 	srnd(time((long *) NULL) + getpid());
+X  	origsp = seekpts;
+X  	for (j = 0; j <= Delim; j++) {
+X  
+X  		/*
+X--- 349,364 ----
+X   *	randomization is done within each block.
+X   */
+X  randomize(seekpts)
+X! 	long	*seekpts;
+X  {
+X! 	register int	i, j, cnt;
+X! 	int	start;
+X! 	long	tmp, *origsp;
+X  
+X  	Tbl.str_flags |= STR_RANDOM;
+X! 	srandom(time((long *) NULL) + getpid());
+X  	origsp = seekpts;
+X+ 
+X  	for (j = 0; j <= Delim; j++) {
+X  
+X  		/*
+X***************
+X*** 385,391 ****
+X  		 */
+X  
+X  		for (seekpts = &origsp[start]; cnt > start; cnt--, seekpts++) {
+X! 			i = rnd(cnt - start);
+X  			tmp = seekpts[0];
+X  			seekpts[0] = seekpts[i];
+X  			seekpts[i] = tmp;
+X--- 384,390 ----
+X  		 */
+X  
+X  		for (seekpts = &origsp[start]; cnt > start; cnt--, seekpts++) {
+X! 			i = random() % (cnt - start);
+X  			tmp = seekpts[0];
+X  			seekpts[0] = seekpts[i];
+X  			seekpts[i] = tmp;
+X*** usr/src/games/backgammon/back.h.old	Wed May 29 13:42:57 1985
+X--- usr/src/games/backgammon/back.h	Sat Dec 29 09:22:37 2018
+X***************
+X*** 4,13 ****
+X   * All rights reserved.  The Berkeley software License Agreement
+X   * specifies the terms and conditions for redistribution.
+X   *
+X!  *	@(#)back.h	5.1 (Berkeley) 5/29/85
+X   */
+X  
+X  #include <sgtty.h>
+X  
+X  #define rnum(r)	(random()%r)
+X  #define D0	dice[0]
+X--- 4,14 ----
+X   * All rights reserved.  The Berkeley software License Agreement
+X   * specifies the terms and conditions for redistribution.
+X   *
+X!  *	@(#)back.h	5.2 (2.11BSD) 2018/12/29
+X   */
+X  
+X  #include <sgtty.h>
+X+ #include <stdlib.h>
+X  
+X  #define rnum(r)	(random()%r)
+X  #define D0	dice[0]
+X*** usr/src/games/mille/save.c.old	Thu Mar 21 22:03:33 1996
+X--- usr/src/games/mille/save.c	Sat Dec 29 16:57:38 2018
+X***************
+X*** 1,30 ****
+X  #include	"mille.h"
+X  #include	<string.h>
+X  #include	<sys/types.h>
+X  #include	<sys/stat.h>
+X  #ifndef	unctrl
+X  #include	"unctrl.h"
+X  #endif
+X  
+X- # ifdef	attron
+X- #	include	<term.h>
+X- #	define	_tty	cur_term->Nttyb
+X- # endif	attron
+X- 
+X- /*
+X-  * @(#)save.c	1.3 (2.11BSD) 1996/3/21
+X-  */
+X- 
+X  typedef	struct stat	STAT;
+X  
+X- extern	char	*ctime();
+X- extern	int	read(), write();
+X- 
+X  /*
+X   *	This routine saves the current game for use at a later date
+X   */
+X- extern int	errno;
+X- 
+X  save() {
+X  
+X  	reg char	*sp;
+X--- 1,23 ----
+X+ /*
+X+  * @(#)save.c	1.4 (2.11BSD) 2018/12/29
+X+  */
+X+ 
+X  #include	"mille.h"
+X  #include	<string.h>
+X  #include	<sys/types.h>
+X  #include	<sys/stat.h>
+X+ #include	<time.h>
+X+ #include	<unistd.h>
+X+ #include	<errno.h>
+X  #ifndef	unctrl
+X  #include	"unctrl.h"
+X  #endif
+X  
+X  typedef	struct stat	STAT;
+X  
+X  /*
+X   *	This routine saves the current game for use at a later date
+X   */
+X  save() {
+X  
+X  	reg char	*sp;
+X***************
+X*** 129,132 ****
+X  	Fromfile = file;
+X  	return !On_exit;
+X  }
+X- 
+X--- 122,124 ----
+X*** usr/src/games/mille/mille.h.old	Sat Jan 11 13:47:33 1986
+X--- usr/src/games/mille/mille.h	Sat Dec 29 16:59:51 2018
+X***************
+X*** 2,8 ****
+X  # include	"curses.h"
+X  
+X  /*
+X!  * @(#)mille.h	1.1 (Berkeley) 4/1/82
+X   */
+X  
+X  /*
+X--- 2,8 ----
+X  # include	"curses.h"
+X  
+X  /*
+X!  * @(#)mille.h	1.2 (2.11BSD) 2018/12/29
+X   */
+X  
+X  /*
+X***************
+X*** 113,133 ****
+X  # define	FILEPROMPT		6
+X  # define	EXTENSIONPROMPT		7
+X  # define	OVERWRITEFILEPROMPT	8
+X- 
+X- # ifdef	SYSV
+X- # define	srandom(x)	srand(x)
+X- # define	random()	rand()
+X- 
+X- # ifndef	attron
+X- #	define	erasechar()	_tty.c_cc[VERASE]
+X- #	define	killchar()	_tty.c_cc[VKILL]
+X- # endif
+X- # else
+X- # ifndef	erasechar
+X- #	define	erasechar()	_tty.sg_erase
+X- #	define	killchar()	_tty.sg_kill
+X- # endif
+X- # endif	SYSV
+X  
+X  typedef struct {
+X  	bool	coups[NUM_SAFE];
+X--- 113,118 ----
+X*** usr/src/games/mille/mille.c.old	Tue Jan 17 01:07:46 1995
+X--- usr/src/games/mille/mille.c	Sat Dec 29 17:55:51 2018
+X***************
+X*** 1,11 ****
+X! # include	"mille.h"
+X! # include	<signal.h>
+X! # ifdef attron
+X! #	include	<term.h>
+X! # endif	attron
+X  
+X  /*
+X!  * @(#)mille.c	1.3.1 (2.11BSD GTE) 1/16/95
+X   */
+X  
+X  int	rub();
+X--- 1,10 ----
+X! #include	"mille.h"
+X! #include	<signal.h>
+X! #include	<stdlib.h>
+X! #include	<time.h>
+X  
+X  /*
+X!  * @(#)mille.c	1.4 (2.11BSD) 2018/12/29
+X   */
+X  
+X  int	rub();
+X***************
+X*** 47,55 ****
+X  	setbuf(stdout, _sobuf);
+X  	Play = PLAYER;
+X  	initscr();
+X- # ifdef attron
+X- #	define	CA	cursor_address
+X- # endif
+X  	if (!CA) {
+X  		printf("Sorry.  Need cursor addressing to play mille\n");
+X  		exit(-1);
+X--- 46,51 ----
+X***************
+X*** 58,76 ****
+X  	stdscr = Board = newwin(BOARD_Y, BOARD_X, 0, 0);
+X  	Score = newwin(SCORE_Y, SCORE_X, 0, 40);
+X  	Miles = newwin(MILES_Y, MILES_X, 17, 0);
+X- #ifdef attron
+X- 	idlok(Board, TRUE);
+X- 	idlok(Score, TRUE);
+X- 	idlok(Miles, TRUE);
+X- #endif
+X  	leaveok(Score, TRUE);
+X  	leaveok(Miles, TRUE);
+X  	clearok(curscr, TRUE);
+X! # ifndef PROF
+X! 	srandom(getpid());
+X! # else
+X! 	srandom(0);
+X! # endif
+X  	crmode();
+X  	noecho();
+X  	signal(SIGINT, rub);
+X--- 54,67 ----
+X  	stdscr = Board = newwin(BOARD_Y, BOARD_X, 0, 0);
+X  	Score = newwin(SCORE_Y, SCORE_X, 0, 40);
+X  	Miles = newwin(MILES_Y, MILES_X, 17, 0);
+X  	leaveok(Score, TRUE);
+X  	leaveok(Miles, TRUE);
+X  	clearok(curscr, TRUE);
+X! #ifndef PROF
+X! 	srandom(time((void *)NULL) + getpid());
+X! #else
+X! 	srandom(0L);
+X! #endif
+X  	crmode();
+X  	noecho();
+X  	signal(SIGINT, rub);
+X***************
+X*** 109,116 ****
+X  }
+X  
+X  /*
+X!  *	Routine to trap rubouts, and make sure they really want to
+X!  * quit.
+X   */
+X  rub() {
+X  
+X--- 100,106 ----
+X  }
+X  
+X  /*
+X!  *	Routine to trap rubouts, and make sure they really want to quit.
+X   */
+X  rub() {
+X  
+X***************
+X*** 132,135 ****
+X  	endwin();
+X  	exit(1);
+X  }
+X- 
+X--- 122,124 ----
+X*** usr/src/games/mille/roll.c.old	Sat Jan 11 13:47:36 1986
+X--- usr/src/games/mille/roll.c	Sat Dec 29 18:44:47 2018
+X***************
+X*** 1,20 ****
+X  # include	"mille.h"
+X  
+X  /*
+X   *	This routine rolls ndie nside-sided dice.
+X   *
+X!  * @(#)roll.c	1.1 (Berkeley) 4/1/82
+X   *
+X   */
+X  
+X! roll(ndie, nsides)
+X! reg int	ndie, nsides; {
+X  
+X! 	reg int			tot;
+X! 	extern unsigned int	random();
+X! 
+X! 	tot = 0;
+X! 	while (ndie--)
+X! 		tot += random() % nsides + 1;
+X  	return tot;
+X! }
+X--- 1,23 ----
+X  # include	"mille.h"
+X+ #include	<stdlib.h>
+X  
+X  /*
+X   *	This routine rolls ndie nside-sided dice.
+X   *
+X!  * @(#)roll.c	1.2 (2.11BSD) 2018/12/29
+X   *
+X   */
+X  
+X! int roll(ndie, nsides)
+X! reg int	ndie, nsides;
+X! 	{
+X! 	int	tot = 0;
+X! 	long 	r;
+X  
+X! 	while	(ndie--)
+X! 		{
+X! 		r = random();
+X! 		tot += r % nsides + 1;
+X! 		}
+X  	return tot;
+X! 	}
+X*** usr/src/games/atc/main.c.old	Tue Mar 10 21:05:14 1987
+X--- usr/src/games/atc/main.c	Sun Dec 30 11:36:55 2018
+X***************
+X*** 3,25 ****
+X   *
+X   * Copy permission is hereby granted provided that this notice is
+X   * retained on all partial or complete copies.
+X-  *
+X-  * For more info on this and all of my stuff, mail edjames@berkeley.edu.
+X   */
+X  
+X  #include "include.h"
+X  
+X  main(ac, av)
+X  	char	*av[];
+X  {
+X! 	int			seed;
+X  	int			f_usage = 0, f_list = 0, f_showscore = 0;
+X  	int			f_printpath = 0;
+X  	char			*file = NULL;
+X  	char			*name, *ptr;
+X- #ifdef BSD
+X  	struct itimerval	itv;
+X- #endif
+X  	extern int		update(), quit(), log_score();
+X  	extern char		*default_game(), *okay_game();
+X  
+X--- 3,26 ----
+X   *
+X   * Copy permission is hereby granted provided that this notice is
+X   * retained on all partial or complete copies.
+X   */
+X  
+X+ /*
+X+  * @(#)main.c 1.1 (2.11BSD) 2018/12/29
+X+  */
+X+ 
+X  #include "include.h"
+X  
+X  main(ac, av)
+X+ 	int	ac;
+X  	char	*av[];
+X  {
+X! 	long			seed;
+X  	int			f_usage = 0, f_list = 0, f_showscore = 0;
+X  	int			f_printpath = 0;
+X  	char			*file = NULL;
+X  	char			*name, *ptr;
+X  	struct itimerval	itv;
+X  	extern int		update(), quit(), log_score();
+X  	extern char		*default_game(), *okay_game();
+X  
+X***************
+X*** 104,172 ****
+X  
+X  	signal(SIGINT, quit);
+X  	signal(SIGQUIT, quit);
+X- #ifdef BSD
+X  	signal(SIGTSTP, SIG_IGN);
+X  	signal(SIGSTOP, SIG_IGN);
+X- #endif
+X  	signal(SIGHUP, log_score);
+X  	signal(SIGTERM, log_score);
+X  
+X- #ifdef BSD
+X  	ioctl(fileno(stdin), TIOCGETP, &tty_start);
+X  	bcopy(&tty_start, &tty_new, sizeof(tty_new));
+X  	tty_new.sg_flags |= CBREAK;
+X  	tty_new.sg_flags &= ~ECHO;
+X  	ioctl(fileno(stdin), TIOCSETP, &tty_new);
+X- #endif
+X  
+X- #ifdef SYSV
+X- 	ioctl(fileno(stdin), TCGETA, &tty_start);
+X- 	bcopy(&tty_start, &tty_new, sizeof(tty_new));
+X- 	tty_new.c_lflag &= ~ICANON;
+X- 	tty_new.c_lflag &= ~ECHO;
+X- 	tty_new.c_cc[VMIN] = 1;
+X- 	tty_new.c_cc[VTIME] = 0;
+X- 	ioctl(fileno(stdin), TCSETAW, &tty_new);
+X- #endif
+X- 
+X  	signal(SIGALRM, update);
+X  
+X- #ifdef BSD
+X  	itv.it_value.tv_sec = 0;
+X  	itv.it_value.tv_usec = 1;
+X  	itv.it_interval.tv_sec = sp->update_secs;
+X  	itv.it_interval.tv_usec = 0;
+X  	setitimer(ITIMER_REAL, &itv, NULL);
+X- #endif
+X- #ifdef SYSV
+X- 	alarm(sp->update_secs);
+X- #endif
+X  
+X  	for (;;) {
+X  		if (getcommand() != 1)
+X  			planewin();
+X  		else {
+X- #ifdef BSD
+X  			itv.it_value.tv_sec = 0;
+X  			itv.it_value.tv_usec = 0;
+X  			setitimer(ITIMER_REAL, &itv, NULL);
+X- #endif
+X- #ifdef SYSV
+X- 			alarm(0);
+X- #endif
+X- 
+X  			update();
+X- 
+X- #ifdef BSD
+X  			itv.it_value.tv_sec = sp->update_secs;
+X  			itv.it_value.tv_usec = 0;
+X  			itv.it_interval.tv_sec = sp->update_secs;
+X  			itv.it_interval.tv_usec = 0;
+X  			setitimer(ITIMER_REAL, &itv, NULL);
+X- #endif
+X- #ifdef SYSV
+X- 			alarm(sp->update_secs);
+X- #endif
+X  		}
+X  	}
+X  }
+X--- 105,142 ----
+X*** usr/src/games/atc/update.c.old	Sun Feb 13 12:45:47 2000
+X--- usr/src/games/atc/update.c	Sun Dec 30 11:37:34 2018
+X***************
+X*** 7,17 ****
+X   * For more info on this and all of my stuff, mail edjames@berkeley.edu.
+X   */
+X  
+X! #if	!defined(lint) && defined(DOSCCS)
+X! static char sccsid[] = "@(#)update.c	1.3.1 (2.11BSD) 1999/10/25";
+X! #endif
+X  
+X  #include "include.h"
+X  
+X  update()
+X  {
+X--- 7,18 ----
+X   * For more info on this and all of my stuff, mail edjames@berkeley.edu.
+X   */
+X  
+X! /*
+X!  * @(#)update.c	1.3.2 (2.11BSD) 2018/12/30
+X!  */
+X  
+X  #include "include.h"
+X+ #include <stdlib.h>
+X  
+X  update()
+X  {
+X*** usr/src/games/atc/include.h.old	Tue Mar 10 21:05:14 1987
+X--- usr/src/games/atc/include.h	Sun Dec 30 11:38:06 2018
+X***************
+X*** 3,48 ****
+X   *
+X   * Copy permission is hereby granted provided that this notice is
+X   * retained on all partial or complete copies.
+X-  *
+X-  * For more info on this and all of my stuff, mail edjames@berkeley.edu.
+X   */
+X  
+X  #include <stdio.h>
+X  #include <ctype.h>
+X- #ifdef SYSV
+X- #include <sys/types.h>
+X- #endif
+X  #include <pwd.h>
+X  
+X- #ifdef BSD
+X  #include <sgtty.h>
+X  #include <sys/time.h>
+X  #include <sys/file.h>
+X- #endif
+X  
+X- #ifdef SYSV
+X  #include <fcntl.h>
+X  #include <unistd.h>
+X  #include <string.h>
+X  #include <sys/utsname.h>
+X- #endif
+X  
+X  #include <signal.h>
+X  #include <math.h>
+X  
+X  #include <curses.h>
+X- 
+X- #ifdef SYSV
+X- #define	index	strchr
+X- #define	rindex	strrchr
+X- #define bcopy(a,b,c)	memcpy((b), (a), (c))
+X- #define	bzero(a,b)	memset((a), '\0', (b))
+X- #define	srandom	srand
+X- #define	random	rand
+X- #define	sgttyb	termio
+X- #define	sg_erase c_cc[2]
+X- #define	sg_kill c_cc[3]
+X- #endif
+X  
+X  #include "def.h"
+X  #include "struct.h"
+X--- 3,31 ----
+X   *
+X   * Copy permission is hereby granted provided that this notice is
+X   * retained on all partial or complete copies.
+X   */
+X  
+X+ /*
+X+  * @(#)include.h 2.0 (2.11BSD) 2018/12/30
+X+  */
+X+ 
+X  #include <stdio.h>
+X  #include <ctype.h>
+X  #include <pwd.h>
+X  
+X  #include <sgtty.h>
+X  #include <sys/time.h>
+X  #include <sys/file.h>
+X  
+X  #include <fcntl.h>
+X  #include <unistd.h>
+X  #include <string.h>
+X  #include <sys/utsname.h>
+X  
+X  #include <signal.h>
+X  #include <math.h>
+X  
+X  #include <curses.h>
+X  
+X  #include "def.h"
+X  #include "struct.h"
+X*** usr/src/games/atc/log.c.old	Sat Dec 26 15:09:29 1987
+X--- usr/src/games/atc/log.c	Sun Dec 30 11:36:32 2018
+X***************
+X*** 7,15 ****
+X   * For more info on this and all of my stuff, mail edjames@berkeley.edu.
+X   */
+X  
+X! #ifndef lint
+X! static char sccsid[] = "@(#)log.c	1.4 (Berkeley) 12/26/87";
+X! #endif not lint
+X  
+X  #include "include.h"
+X  
+X--- 7,15 ----
+X   * For more info on this and all of my stuff, mail edjames@berkeley.edu.
+X   */
+X  
+X! /*
+X!  * @(#)log.c 1.5 (2.11BSD) 2018/12/30
+X!  */
+X  
+X  #include "include.h"
+X  
+X***************
+X*** 58,66 ****
+X  	FILE		*fp;
+X  	char		*cp, logstr[BUFSIZ], *index(), *rindex();
+X  	SCORE		score[100], thisscore;
+X- #ifdef SYSV
+X- 	struct utsname	name;
+X- #endif
+X  
+X  	strcpy(logstr, SPECIAL_DIR);
+X  	strcat(logstr, LOG);
+X--- 58,63 ----
+X***************
+X*** 80,95 ****
+X  		perror(logstr);
+X  		return (-1);
+X  	}
+X- #ifdef BSD
+X  	if (flock(fileno(fp), LOCK_EX) < 0)
+X! #endif
+X! #ifdef SYSV
+X! 	while (lockf(fileno(fp), F_LOCK, 1) < 0)
+X! #endif
+X! 	{
+X  		perror("flock");
+X  		return (-1);
+X! 	}
+X  	for (;;) {
+X  		good = fscanf(fp, "%s %s %s %d %d %d",
+X  			score[num_scores].name, 
+X--- 77,87 ----
+X  		perror(logstr);
+X  		return (-1);
+X  	}
+X  	if (flock(fileno(fp), LOCK_EX) < 0)
+X! 		{
+X  		perror("flock");
+X  		return (-1);
+X! 		}
+X  	for (;;) {
+X  		good = fscanf(fp, "%s %s %s %d %d %d",
+X  			score[num_scores].name, 
+X***************
+X*** 109,124 ****
+X  			return (-1);
+X  		}
+X  		strcpy(thisscore.name, pw->pw_name);
+X- #ifdef BSD
+X  		if (gethostname(thisscore.host, sizeof (thisscore.host)) < 0) {
+X  			perror("gethostname");
+X  			return (-1);
+X  		}
+X- #endif
+X- #ifdef SYSV
+X- 		uname(&name);
+X- 		strcpy(thisscore.host, name.sysname);
+X- #endif
+X  
+X  		cp = rindex(file, '/');
+X  		if (cp == NULL) {
+X--- 101,110 ----
+X***************
+X*** 189,200 ****
+X  		}
+X  		putchar('\n');
+X  	}
+X- #ifdef BSD
+X  	flock(fileno(fp), LOCK_UN);
+X- #endif
+X- #ifdef SYSV
+X- 	/* lock will evaporate upon close */
+X- #endif
+X  	fclose(fp);
+X  	printf("%2s:  %-8s  %-8s  %-18s  %4s  %9s  %4s\n", "#", "name", "host", 
+X  		"game", "time", "real time", "planes safe");
+X--- 175,181 ----
+X*** usr/src/games/atc/graphics.c.old	Tue Mar 10 21:05:14 1987
+X--- usr/src/games/atc/graphics.c	Sun Dec 30 11:35:28 2018
+X***************
+X*** 3,16 ****
+X   *
+X   * Copy permission is hereby granted provided that this notice is
+X   * retained on all partial or complete copies.
+X-  *
+X-  * For more info on this and all of my stuff, mail edjames@berkeley.edu.
+X   */
+X  
+X  #include "include.h"
+X- #ifdef SYSV
+X  #include <errno.h>
+X- #endif
+X  
+X  #define C_TOPBOTTOM		'-'
+X  #define C_LEFTRIGHT		'|'
+X--- 3,16 ----
+X   *
+X   * Copy permission is hereby granted provided that this notice is
+X   * retained on all partial or complete copies.
+X   */
+X  
+X+ /*
+X+  * @(#)graphics.c  2.0 (2.11BSD) 2018/12/30
+X+  */
+X+ 
+X  #include "include.h"
+X  #include <errno.h>
+X  
+X  #define C_TOPBOTTOM		'-'
+X  #define C_LEFTRIGHT		'|'
+X***************
+X*** 24,38 ****
+X  
+X  getAChar()
+X  {
+X- #ifdef BSD
+X  	return (getchar());
+X- #endif
+X- #ifdef SYSV
+X- 	int c;
+X- 
+X- 	while ((c = getchar()) == -1 && errno == EINTR) ;
+X- 	return(c);
+X- #endif
+X  }
+X  
+X  erase_all()
+X--- 24,30 ----
+X***************
+X*** 251,264 ****
+X  	c = getchar();
+X  	if (c == EOF || c == 'y') {
+X  		/* disable timer */
+X- #ifdef BSD
+X  		itv.it_value.tv_sec = 0;
+X  		itv.it_value.tv_usec = 0;
+X  		setitimer(ITIMER_REAL, &itv, NULL);
+X- #endif
+X- #ifdef SYSV
+X- 		alarm(0);
+X- #endif
+X  		fflush(stdout);
+X  		clear();
+X  		refresh();
+X--- 243,251 ----
+X***************
+X*** 280,294 ****
+X  	char	*command();
+X  	int	warning = 0;
+X  
+X- #ifdef BSD
+X  	wclear(planes);
+X- #endif
+X  
+X  	wmove(planes, 0,0);
+X  
+X- #ifdef SYSV
+X- 	wclrtobot(planes);
+X- #endif
+X  	wprintw(planes, "Time: %-4d Safe: %d", clock, safe_planes);
+X  	wmove(planes, 2, 0);
+X  
+X--- 267,276 ----
+X***************
+X*** 322,340 ****
+X  	char	*s;
+X  {
+X  	int			c;
+X- #ifdef BSD
+X  	struct itimerval	itv;
+X- #endif
+X  
+X  	/* disable timer */
+X- #ifdef BSD
+X  	itv.it_value.tv_sec = 0;
+X  	itv.it_value.tv_usec = 0;
+X  	setitimer(ITIMER_REAL, &itv, NULL);
+X- #endif
+X- #ifdef SYSV
+X- 	alarm(0);
+X- #endif
+X  
+X  	wmove(input, 0, 0);
+X  	wclrtobot(input);
+X--- 304,315 ----
+X***************
+X*** 368,374 ****
+X  	wrefresh(input);
+X  	fflush(stdout);
+X  }
+X- 
+X  
+X  done_screen()
+X  {
+X--- 343,348 ----
+X*** usr/src/games/atc/input.c.old	Thu Oct 22 13:32:20 1987
+X--- usr/src/games/atc/input.c	Sun Dec 30 11:35:57 2018
+X***************
+X*** 3,15 ****
+X   *
+X   * Copy permission is hereby granted provided that this notice is
+X   * retained on all partial or complete copies.
+X-  *
+X-  * For more info on this and all of my stuff, mail edjames@berkeley.edu.
+X   */
+X  
+X! #ifndef lint
+X! static char sccsid[] = "@(#)input.c	1.2 (Berkeley) 10/22/87";
+X! #endif not lint
+X  
+X  #include "include.h"
+X  
+X--- 3,13 ----
+X   *
+X   * Copy permission is hereby granted provided that this notice is
+X   * retained on all partial or complete copies.
+X   */
+X  
+X! /*
+X!  * @(#)input.c	1.3 (2.11BSD) 2018/12/30
+X!  */
+X  
+X  #include "include.h"
+X  
+X***************
+X*** 17,25 ****
+X  #define MAXDEPTH	15
+X  
+X  #define RETTOKEN	'\n'
+X- #ifdef SYSV
+X- #define CRTOKEN		'\r'
+X- #endif
+X  #define REDRAWTOKEN	'\014'	/* CTRL(L) */
+X  #define	SHELLTOKEN	'!'
+X  #define HELPTOKEN	'?'
+X--- 15,20 ----
+X***************
+X*** 63,71 ****
+X  
+X  RULE	state0[] = {	{ ALPHATOKEN,	1,	"%c:",		setplane},
+X  			{ RETTOKEN,	-1,	"",		NULL	},
+X- #ifdef SYSV
+X- 			{ CRTOKEN,	-1,	"",		NULL	},
+X- #endif
+X  			{ HELPTOKEN,	12,	" [a-z]<ret>",	NULL	}},
+X  	state1[] = {	{ 't',		2,	" turn",	turn	},	
+X  			{ 'a',		3,	" altitude:",	NULL	},	
+X--- 58,63 ----
+X***************
+X*** 97,105 ****
+X  	state4[] = {	{ '@',		9,	" at",		NULL	},	
+X  			{ 'a',		9,	" at",		NULL	},	
+X  			{ RETTOKEN,	-1,	"",		NULL	},
+X- #ifdef SYSV
+X- 			{ CRTOKEN,	-1,	"",		NULL	},
+X- #endif
+X  			{ HELPTOKEN,	12,	" @a<ret>",	NULL	}},
+X  	state5[] = {	{ NUMTOKEN,	7,	"%c",		delayb	},
+X  			{ HELPTOKEN,	12,	" [0-9]",	NULL	}},
+X--- 89,94 ----
+X***************
+X*** 114,127 ****
+X  			{ 'a',		4,	" 270",		rel_dir	},
+X  			{ 'q',		4,	" 315",		rel_dir	},
+X  			{ RETTOKEN,	-1,	"",		NULL	},	
+X- #ifdef SYSV
+X- 			{ CRTOKEN,	-1,	"",		NULL	},	
+X- #endif
+X  			{ HELPTOKEN,	12,	" @a<dir><ret>",NULL	}},
+X  	state7[] = {	{ RETTOKEN,	-1,	"",		NULL	},
+X- #ifdef SYSV
+X- 	            	{ CRTOKEN,	-1,	"",		NULL	},
+X- #endif
+X  			{ HELPTOKEN,	12,	" <ret>",	NULL	}},
+X  	state8[] = {	{ NUMTOKEN,	4,	"%c",		benum	},
+X  			{ HELPTOKEN,	12,	" [0-9]",	NULL	}},
+X--- 103,110 ----
+X***************
+X*** 269,285 ****
+X  	while ((tval = getAChar()) == REDRAWTOKEN || tval == SHELLTOKEN)
+X  	{
+X  		if (tval == SHELLTOKEN)
+X! 		{
+X! #ifdef BSD
+X  			struct itimerval	itv;
+X  			itv.it_value.tv_sec = 0;
+X  			itv.it_value.tv_usec = 0;
+X  			setitimer(ITIMER_REAL, &itv, NULL);
+X- #endif
+X- #ifdef SYSV
+X- 			int aval;
+X- 			aval = alarm(0);
+X- #endif
+X  			if (fork() == 0)	/* child */
+X  			{
+X  				char *shell, *base, *getenv(), *strrchr();
+X--- 252,262 ----
+X  	while ((tval = getAChar()) == REDRAWTOKEN || tval == SHELLTOKEN)
+X  	{
+X  		if (tval == SHELLTOKEN)
+X! 			{
+X  			struct itimerval	itv;
+X  			itv.it_value.tv_sec = 0;
+X  			itv.it_value.tv_usec = 0;
+X  			setitimer(ITIMER_REAL, &itv, NULL);
+X  			if (fork() == 0)	/* child */
+X  			{
+X  				char *shell, *base, *getenv(), *strrchr();
+X***************
+X*** 304,310 ****
+X  			}
+X  
+X  			wait(0);
+X- #ifdef BSD
+X  			ioctl(fileno(stdin), TIOCSETP, &tty_new);
+X  			itv.it_value.tv_sec = 0;
+X  			itv.it_value.tv_usec = 1;
+X--- 281,286 ----
+X***************
+X*** 311,322 ****
+X  			itv.it_interval.tv_sec = sp->update_secs;
+X  			itv.it_interval.tv_usec = 0;
+X  			setitimer(ITIMER_REAL, &itv, NULL);
+X! #endif
+X! #ifdef SYSV
+X! 			ioctl(fileno(stdin), TCSETAW, &tty_new);
+X! 			alarm(aval);
+X! #endif
+X! 		}
+X  		redraw();
+X  	}
+X  
+X--- 287,293 ----
+X  			itv.it_interval.tv_sec = sp->update_secs;
+X  			itv.it_interval.tv_usec = 0;
+X  			setitimer(ITIMER_REAL, &itv, NULL);
+X! 			}
+X  		redraw();
+X  	}
+X  
+X*** usr/src/lib/libc/gen/random.c.old	Sun Mar  9 21:53:43 1986
+X--- usr/src/lib/libc/gen/random.c	Tue Dec 25 09:24:40 2018
+X***************
+X*** 5,11 ****
+X   */
+X  
+X  #if defined(LIBC_SCCS) && !defined(lint)
+X! static char sccsid[] = "@(#)random.c	5.2 (Berkeley) 3/9/86";
+X  #endif LIBC_SCCS and not lint
+X  
+X  #include	<stdio.h>
+X--- 5,11 ----
+X   */
+X  
+X  #if defined(LIBC_SCCS) && !defined(lint)
+X! static char sccsid[] = "@(#)random.c	5.3 (2.11BSD) 12/25/2018";
+X  #endif LIBC_SCCS and not lint
+X  
+X  #include	<stdio.h>
+X***************
+X*** 171,179 ****
+X   * values produced by this routine.
+X   */
+X  
+X! srandom( x )
+X! 
+X!     unsigned		x;
+X  {
+X      	register  int		i, j;
+X  
+X--- 171,179 ----
+X   * values produced by this routine.
+X   */
+X  
+X! void
+X! srandom(x)
+X!     long x;
+X  {
+X      	register  int		i, j;
+X  
+X***************
+X*** 211,219 ****
+X   */
+X  
+X  char  *
+X! initstate( seed, arg_state, n )
+X! 
+X!     unsigned		seed;			/* seed for R. N. G. */
+X      char		*arg_state;		/* pointer to state array */
+X      int			n;			/* # bytes of state info */
+X  {
+X--- 211,218 ----
+X   */
+X  
+X  char  *
+X! initstate(seed, arg_state, n)
+X!     long		seed;			/* seed for R. N. G. */
+X      char		*arg_state;		/* pointer to state array */
+X      int			n;			/* # bytes of state info */
+X  {
+X***************
+X*** 351,354 ****
+X  	}
+X  	return( i );
+X  }
+X- 
+X--- 350,352 ----
+X*** usr/src/libexec/identd/src/parse.c.old	Thu Nov 14 15:06:51 1996
+X--- usr/src/libexec/identd/src/parse.c	Tue Dec 25 08:58:14 2018
+X***************
+X*** 505,511 ****
+X  #ifdef SLEEP_BETWEEN_RETRIES
+X        {
+X  	/* Seed the generator: lport should be unique (among other concurrent identd's) */
+X! 	if (try < 1) srandom(lport);
+X  	/* This gives a max sleep of 0xffff = 65535 microsecs, about 32millisec average */
+X  	usleep(random()&0x00ffff);
+X        }
+X--- 505,511 ----
+X  #ifdef SLEEP_BETWEEN_RETRIES
+X        {
+X  	/* Seed the generator: lport should be unique (among other concurrent identd's) */
+X! 	if (try < 1) srandom((long)lport);
+X  	/* This gives a max sleep of 0xffff = 65535 microsecs, about 32millisec average */
+X  	usleep(random()&0x00ffff);
+X        }
+X*** usr/src/man/man3/random.3.old	Sun Dec 14 17:07:28 1986
+X--- usr/src/man/man3/random.3	Tue Dec 25 09:26:46 2018
+X***************
+X*** 2,10 ****
+X  .\" All rights reserved.  The Berkeley software License Agreement
+X  .\" specifies the terms and conditions for redistribution.
+X  .\"
+X! .\"	@(#)random.3	6.2 (Berkeley) 9/29/85
+X  .\"
+X! .TH RANDOM 3 "September 29, 1985"
+X  .UC 5
+X  .SH NAME
+X  random, srandom, initstate, setstate \- better random number generator; routines for changing generators
+X--- 2,10 ----
+X  .\" All rights reserved.  The Berkeley software License Agreement
+X  .\" specifies the terms and conditions for redistribution.
+X  .\"
+X! .\"	@(#)random.3	6.3 (2.11BSD) 12/19/2018
+X  .\"
+X! .TH RANDOM 3 "December 19, 2018"
+X  .UC 5
+X  .SH NAME
+X  random, srandom, initstate, setstate \- better random number generator; routines for changing generators
+X***************
+X*** 13,22 ****
+X  .B long  random()
+X  .PP
+X  .B srandom(seed)
+X! .B int  seed;
+X  .PP
+X  .B char  *initstate(seed, state, n)
+X! .B unsigned  seed;
+X  .B char  *state;
+X  .B int  n;
+X  .PP
+X--- 13,22 ----
+X  .B long  random()
+X  .PP
+X  .B srandom(seed)
+X! .B long  seed;
+X  .PP
+X  .B char  *initstate(seed, state, n)
+X! .B long seed;
+X  .B char  *state;
+X  .B int  n;
+X  .PP
+X*** usr/src/share/lint/llib-lc.old	Fri Apr 21 22:25:18 2000
+X--- usr/src/share/lint/llib-lc	Tue Dec 25 09:29:31 2018
+X***************
+X*** 1,4 ****
+X! /*	@(#)llib-lc	1.47 (2.11BSD) 1999/9/9 */
+X  
+X  /* LINTLIBRARY */
+X  
+X--- 1,4 ----
+X! /*	@(#)llib-lc	1.48 (2.11BSD) 2018/12/25 */
+X  
+X  /* LINTLIBRARY */
+X  
+X***************
+X*** 290,296 ****
+X  u_long	inet_network(cp) char *cp; { return 0L; }
+X  char *	inet_ntoa(in) struct in_addr in; { return (char *) 0; }
+X  int	initgroups(uname, agroup) char *uname; { return 0; }
+X! char *	initstate( s, st, n) unsigned s; char *st; { return st; }
+X  	insque(elem, pred) struct qelem *elem, pred; { ; }
+X  int	isatty(f) { return 1; }
+X  void	l3tol(l, c, n) long *l; char *c; {;}
+X--- 290,296 ----
+X  u_long	inet_network(cp) char *cp; { return 0L; }
+X  char *	inet_ntoa(in) struct in_addr in; { return (char *) 0; }
+X  int	initgroups(uname, agroup) char *uname; { return 0; }
+X! char *	initstate( s, st, n) long s; char *st; int n; { return st; }
+X  	insque(elem, pred) struct qelem *elem, pred; { ; }
+X  int	isatty(f) { return 1; }
+X  void	l3tol(l, c, n) long *l; char *c; {;}
+X***************
+X*** 369,375 ****
+X  int	setuid(u) uid_t u; { return(0); }
+X  	setusershell() { ; }
+X  int	sleep(i) unsigned i; {}
+X! int	srand(s){ return s; }
+X  int	strcasecmp(a, b) char *a, *b; { return(1); }
+X  int	strncasecmp(a, b, n) char *a, *b; { return (1); }
+X  char *	strcat(a, b) char *a, *b; { return a; }
+X--- 369,376 ----
+X  int	setuid(u) uid_t u; { return(0); }
+X  	setusershell() { ; }
+X  int	sleep(i) unsigned i; {}
+X! void	srand(s) unsigned s; {}
+X! void	srandom(s) long s; {}
+X  int	strcasecmp(a, b) char *a, *b; { return(1); }
+X  int	strncasecmp(a, b, n) char *a, *b; { return (1); }
+X  char *	strcat(a, b) char *a, *b; { return a; }
+X*** usr/src/share/lint/Makefile.old	Fri Sep 26 23:45:21 1997
+X--- usr/src/share/lint/Makefile	Sat Apr 27 08:41:02 2019
+X***************
+X*** 1,7 ****
+X  #
+X  # Public domain - 1996/10/23 - sms
+X  #
+X! #	@(#)Makefile	1.1 (2.11BSD) 1997/9/26
+X  #
+X  #  Makefile for the lint libraries.
+X  #
+X--- 1,7 ----
+X  #
+X  # Public domain - 1996/10/23 - sms
+X  #
+X! #	@(#)Makefile	1.2 (2.11BSD) 2019/4/27
+X  #
+X  #  Makefile for the lint libraries.
+X  #
+X***************
+X*** 18,23 ****
+X--- 18,24 ----
+X  	-mkdir -p ${S}
+X  	-chmod a+r,a+x ${S}
+X  	install -c -m 444 ${SRCS} ${S}
+X+ 	make libs
+X  
+X  clean:
+X  
+X*** usr/src/usr.lib/libF77/random_.c.old	Sat Feb 21 23:22:28 1987
+X--- usr/src/usr.lib/libF77/random_.c	Tue Dec 25 09:03:28 2018
+X***************
+X*** 3,9 ****
+X   * All rights reserved.  The Berkeley software License Agreement
+X   * specifies the terms and conditions for redistribution.
+X   *
+X!  *	@(#)random_.c	5.2	6/7/85
+X   * 
+X   * Routines to return random values
+X   *
+X--- 3,9 ----
+X   * All rights reserved.  The Berkeley software License Agreement
+X   * specifies the terms and conditions for redistribution.
+X   *
+X!  *	@(#)random_.c	5.3 (2.11BSD) 12/25/2018
+X   * 
+X   * Routines to return random values
+X   *
+X***************
+X*** 19,24 ****
+X--- 19,26 ----
+X   *	Real values will range from 0.0 thru 1.0 .
+X   */
+X  
+X+ #include <stdlib.h>
+X+ 
+X  #if	vax
+X  #define	RANDMAX		2147483647
+X  #else	vax
+X***************
+X*** 32,38 ****
+X  long irandm_(iarg)
+X  long *iarg;
+X  {
+X! 	if (*iarg) srandom((int)*iarg);
+X  	return( random() );
+X  }
+X  
+X--- 34,40 ----
+X  long irandm_(iarg)
+X  long *iarg;
+X  {
+X! 	if (*iarg) srandom(*iarg);
+X  	return( random() );
+X  }
+X  
+X***************
+X*** 39,45 ****
+X  float random_(iarg)
+X  long *iarg;
+X  {
+X! 	if (*iarg) srandom((int)*iarg);
+X  	return( (float)(random())/(float)RANDMAX );
+X  }
+X  
+X--- 41,47 ----
+X  float random_(iarg)
+X  long *iarg;
+X  {
+X! 	if (*iarg) srandom(*iarg);
+X  	return( (float)(random())/(float)RANDMAX );
+X  }
+X  
+X***************
+X*** 46,51 ****
+X  double drandm_(iarg)
+X  long *iarg;
+X  {
+X! 	if (*iarg) srandom((int)*iarg);
+X  	return( (double)(random())/(double)RANDMAX );
+X  }
+X--- 48,53 ----
+X  double drandm_(iarg)
+X  long *iarg;
+X  {
+X! 	if (*iarg) srandom(*iarg);
+X  	return( (double)(random())/(double)RANDMAX );
+X  }
+X*** usr/src/usr.lib/libF77/Makefile.old	Mon Dec 26 01:38:13 1988
+X--- usr/src/usr.lib/libF77/Makefile	Tue Dec 25 09:06:46 2018
+X***************
+X*** 3,9 ****
+X  # All rights reserved.  The Berkeley software License Agreement
+X  # specifies the terms and conditions for redistribution.
+X  #
+X! #	@(#)Makefile	5.4 (Berkeley) 8/9/85
+X  #
+X  # Makefile for f77 math & startup lib, libF77.a
+X  
+X--- 3,9 ----
+X  # All rights reserved.  The Berkeley software License Agreement
+X  # specifies the terms and conditions for redistribution.
+X  #
+X! #	@(#)Makefile	5.5 (2.11BSD) 12/25/2018
+X  #
+X  # Makefile for f77 math & startup lib, libF77.a
+X  
+X***************
+X*** 316,322 ****
+X  		@$(CC) mkvers.c -o mkvers
+X  
+X  clean:;		@rm -f $(OBJS1) $(OBJS2) profiled/*.o $(LIBRARY) $(LIBRARY_P) \
+X! 		Version
+X  
+X  depend:;	@echo Construct dependencies manually
+X  
+X--- 316,322 ----
+X  		@$(CC) mkvers.c -o mkvers
+X  
+X  clean:;		@rm -f $(OBJS1) $(OBJS2) profiled/*.o $(LIBRARY) $(LIBRARY_P) \
+X! 		Version profiled/Version
+X  
+X  depend:;	@echo Construct dependencies manually
+X  
+X*** VERSION.old	Sat Dec 22 08:22:27 2018
+X--- VERSION	Sat Apr 27 08:42:59 2019
+X***************
+X*** 1,5 ****
+X! Current Patch Level: 451
+X! Date: December 22, 2018
+X  
+X  2.11 BSD
+X  ============
+X--- 1,5 ----
+X! Current Patch Level: 452
+X! Date: April 27, 2019
+X  
+X  2.11 BSD
+X  ============
+SHAR_EOF
+fi
+exit 0
+#	End of shell archive

@@ -1,0 +1,678 @@
+Subject: kernel timezone struct deprecated
+Index:	 src/bin/date.c src/lib/libc/gen/ctime.c src/man/man1/date.1
+
+Description:
+	This started many months ago with a discussion with bqt@softjar.se
+	that began:
+
+	The date command, when setting the date, does not make use of
+	/etc/localtime. So if someone have a kernel built for a completely
+	different timezone, installs the correct /etc/localtime, everything
+	seems fine in displaying time, but if they try to set the time, they are
+	getting completely unexpected results...
+
+	There was much more and over several months of on/off email the
+	'bug' was identified as date(1) using both kernel timezone info
+	and the timezone info (either /etc/localtime or the environment
+	variable TZ) resulting in inconsistent and unexpected behaviour.
+
+	The decision has been made to offically deprecate the kernel
+	timezone structure and modify date(1) to not use the kernel timezone
+	structure and only use ctime(3) information.  The kernel has never
+	used the timezone structure.  The structure will now be present only
+	for historical reference and compatibility with user programs that 
+	use gettimeofday() and settimeofday() to get and set the timezone 
+	structure.
+	
+	date(1) has the -d and -t options removed.  date(1) will no longer
+	get or set the DST and TZ info in the kernel structure.
+
+	ctime(3)'s order of timezone determination has been changed from:
+
+	1) environment variable TZ
+	2) /etc/localtime
+	3) kernel timezone (from gettimeofday())
+	4) GMT (fallthrough default)
+
+	to
+
+	1) environment variable TZ
+	2) /etc/localtime
+	3) GMT (fallthrough default)
+
+	The kernel config file for the GENERIC kernel is updated to set
+	explicitly the kernel timezone to 0 (GMT).  The 'config' script is
+	modified to force the TZ and DST to 0.
+
+	Note:  while the kernel config file and script are changed it is NOT
+	       necessary to reconfigure or rebuild any kernels.  You may of
+	       course edit your own/local conf files to follow the GENERIC
+	       pattern ;)
+
+Repeat-By:
+	1) Use date(1) as described in the Description.
+
+	2) Do an exhaustive search of the system sources.  The only files
+	outside of the kernel that reference 'struct timezone' (tz_minuteswest
+	and tz_dsttime) are date.c and ctime.c (in libc).  
+
+Fix:
+	Cut where indicated and save to a file (/tmp/454.patch) and then:
+
+cd /
+patch -p0 < /tmp/454.patch
+
+cd /usr/src/lib/libc/gen
+make ctime.o
+ar rv /lib/libc.a ctime.o
+ranlib /lib/libc.a
+cd profiled
+ar rv /usr/lib/libc_p.a ctime.o
+ranlib /usr/lib/libc_p.a
+cd ..
+make clean
+
+cd /usr/src/man/man1
+make date.0
+/usr/man/manroff date.1 > date.0
+install -c -o bin -g bin -m 444 date.0 /usr/man/cat1
+make clean
+
+cd /usr/src/bin
+make date
+install -s -m 751 -g staff date /bin/date
+make clean
+
+	This and previous updates to 2.11BSD are available at the following
+	locations:
+	
+	ftp://ftp.update.uu.se/pub/pdp11/2.11BSD
+	https://www.tuhs.org/Archive/Distributions/UCB/2.11BSD/Patches/
+	ftp://ftp.2bsd.com/2.11BSD
+
+---------------------------cut here--------------------
+*** usr/src/bin/date.c.old	Wed Jul 10 22:00:34 1996
+--- usr/src/bin/date.c	Mon Oct 21 13:03:48 2019
+***************
+*** 2,7 ****
+--- 2,10 ----
+   * Copyright (c) 1985 Regents of the University of California.
+   * All rights reserved.  The Berkeley software License Agreement
+   * specifies the terms and conditions for redistribution.
++  *
++  *  2019-07-11 Fixed inconsistent timezone/dst management
++  *  2019-10-20 Remove use of deprecated kernel timezone structure
+   */
+  
+  #if	!defined(LINT) && defined(DOSCCS)
+***************
+*** 9,15 ****
+  "@(#) Copyright (c) 1985 Regents of the University of California.\n\
+   All rights reserved.\n";
+  
+! static char sccsid[] = "@(#)date.c	4.20.1 (2.11BSD) 96/7/10";
+  #endif
+  
+  /*
+--- 12,18 ----
+  "@(#) Copyright (c) 1985 Regents of the University of California.\n\
+   All rights reserved.\n";
+  
+! static char sccsid[] = "@(#)date.c	5.0 (2.11BSD) 2019/10/20";
+  #endif
+  
+  /*
+***************
+*** 47,77 ****
+  	int	argc;
+  	char	**argv;
+  {
+! 	static char	usage[] = "usage: date [-nu] [-d dst] [-t timezone] [yymmddhhmm[.ss]]\n";
+! 	struct timezone	tz;
+  	char	*ap,			/* time string */
+  		*tzn;			/* time zone */
+  	int	ch,			/* getopts char */
+- 		uflag,			/* do it in GMT */
+  		nflag,			/* only set time locally */
+  		wf;			/* wtmp file descriptor */
+  	char	*username;
+  
+! 	nflag = uflag = 0;
+! 	tz.tz_dsttime = tz.tz_minuteswest = 0;
+! 	while ((ch = getopt(argc,argv,"d:nut:")) != EOF)
+  		switch((char)ch) {
+- 		case 'd':
+- 			tz.tz_dsttime = atoi(optarg) ? 1 : 0;
+- 			break;
+  		case 'n':
+  			nflag = 1;
+  			break;
+- 		case 't':
+- 			tz.tz_minuteswest = atoi(optarg);
+- 			break;
+  		case 'u':
+! 			uflag = 1;
+  			break;
+  		default:
+  			fputs(usage,stderr);
+--- 50,72 ----
+  	int	argc;
+  	char	**argv;
+  {
+! 	static char	usage[] = "usage: date [-nu] [[[[yy]mm]dd]hhmm[.ss]]\n";
+! 	struct tm	*tp;
+  	char	*ap,			/* time string */
+  		*tzn;			/* time zone */
+  	int	ch,			/* getopts char */
+  		nflag,			/* only set time locally */
+  		wf;			/* wtmp file descriptor */
+  	char	*username;
+  
+! 	nflag = 0;
+! 	while ((ch = getopt(argc,argv,"nu")) != EOF)
+  		switch((char)ch) {
+  		case 'n':
+  			nflag = 1;
+  			break;
+  		case 'u':
+! 			(void)setenv("TZ", "GMT", 1);
+  			break;
+  		default:
+  			fputs(usage,stderr);
+***************
+*** 85,106 ****
+  		exit(1);
+  	}
+  
+- 	if ((tz.tz_minuteswest || tz.tz_dsttime) &&
+- 	    settimeofday((struct timeval *)NULL,&tz)) {
+- 		perror("settimeofday");
+- 		retval = 1;
+- 		goto display;
+- 	}
+  
+- 	if (gettimeofday(&tv,&tz)) {
+- 		perror("gettimeofday");
+- 		exit(1);
+- 	}
+- 
+  	if (!argc)
+  		goto display;
+  
+  	wtmp[0].ut_time = tv.tv_sec;
+  	if (gtime(*argv)) {
+  		fputs(usage,stderr);
+  		retval = 1;
+--- 80,93 ----
+  		exit(1);
+  	}
+  
+  
+  	if (!argc)
+  		goto display;
+  
++ 	time(&tv.tv_sec);
++ 
+  	wtmp[0].ut_time = tv.tv_sec;
++ 
+  	if (gtime(*argv)) {
+  		fputs(usage,stderr);
+  		retval = 1;
+***************
+*** 107,120 ****
+  		goto display;
+  	}
+  
+! 	if (!uflag) {		/* convert to GMT assuming local time */
+! 		tv.tv_sec += (long)tz.tz_minuteswest * SECS_PER_MIN;
+! 				/* now fix up local daylight time */
+! 		if (localtime((time_t *)&tv.tv_sec)->tm_isdst)
+! 			tv.tv_sec -= SECS_PER_HOUR;
+! 	}
+! 	if (nflag || !netsettime(tv)) {
+! 		if (settimeofday(&tv,(struct timezone *)0)) {
+  			perror("settimeofday");
+  			retval = 1;
+  			goto display;
+--- 94,108 ----
+  		goto display;
+  	}
+  
+! /*
+!  * To avoid using the (obsolete) kernel timezone structure call localtime()
+!  * to initialize the timezone info and set tm_gmtoff
+! */
+! 	tp = localtime((time_t *)&tv.tv_sec);
+! 	tv.tv_sec -= tp->tm_gmtoff;
+! 
+! 	if (nflag || !netsettime(tv.tv_sec)) {
+! 		if (settimeofday(&tv, NULL)) {
+  			perror("settimeofday");
+  			retval = 1;
+  			goto display;
+***************
+*** 139,155 ****
+  		perror("gettimeofday");
+  		exit(1);
+  	}
+! 	if (uflag) {
+! 		ap = asctime(gmtime((time_t *)&tv.tv_sec));
+! 		tzn = "GMT";
+! 	}
+! 	else {
+! 		struct tm	*tp;
+! 
+! 		tp = localtime((time_t *)&tv.tv_sec);
+! 		ap = asctime(tp);
+! 		tzn = tp->tm_zone;
+! 	}
+  	printf("%.20s%s%s",ap,tzn,ap + 19);
+  	exit(retval);
+  }
+--- 127,138 ----
+  		perror("gettimeofday");
+  		exit(1);
+  	}
+! /*
+!  * Now display the time
+! */
+! 	tp = localtime((time_t *)&tv.tv_sec);
+! 	ap = asctime(tp);
+! 	tzn = tp->tm_zone;
+  	printf("%.20s%s%s",ap,tzn,ap + 19);
+  	exit(retval);
+  }
+***************
+*** 246,253 ****
+   * Returns 1 on success, 0 on failure.
+   */
+  static
+! netsettime(ntv)
+! 	struct timeval ntv;
+  {
+  	int s, length, port, timed_ack, found, err;
+  	long waittime;
+--- 229,236 ----
+   * Returns 1 on success, 0 on failure.
+   */
+  static
+! netsettime(tval)
+! 	time_t tval;
+  {
+  	int s, length, port, timed_ack, found, err;
+  	long waittime;
+***************
+*** 298,305 ****
+  	}
+  	(void) strncpy(msg.tsp_name, hostname, sizeof (hostname));
+  	msg.tsp_seq = htons((u_short)0);
+! 	msg.tsp_time.tv_sec = htonl((u_long)ntv.tv_sec);
+! 	msg.tsp_time.tv_usec = htonl((u_long)ntv.tv_usec);
+  	length = sizeof (struct sockaddr_in);
+  	if (connect(s, &dest, length) < 0) {
+  		perror("date: connect");
+--- 281,288 ----
+  	}
+  	(void) strncpy(msg.tsp_name, hostname, sizeof (hostname));
+  	msg.tsp_seq = htons((u_short)0);
+! 	msg.tsp_time.tv_sec = htonl((u_long)tval);
+! 	msg.tsp_time.tv_usec = 0;
+  	length = sizeof (struct sockaddr_in);
+  	if (connect(s, &dest, length) < 0) {
+  		perror("date: connect");
+*** usr/src/lib/libc/gen/ctime.c.old	Wed Apr  1 03:42:55 1987
+--- usr/src/lib/libc/gen/ctime.c	Fri Oct 18 17:11:02 2019
+***************
+*** 5,24 ****
+   */
+  
+  #if defined(LIBC_SCCS) && !defined(lint)
+! static char sccsid[] = "@(#)ctime.c	1.1 (Berkeley) 3/25/87";
+  #endif LIBC_SCCS and not lint
+  
+! #include "sys/param.h"
+! #include "sys/time.h"
+! #include "tzfile.h"
+  
+  char *
+  ctime(t)
+  time_t *t;
+  {
+- 	struct tm	*localtime();
+- 	char	*asctime();
+- 
+  	return(asctime(localtime(t)));
+  }
+  
+--- 5,23 ----
+   */
+  
+  #if defined(LIBC_SCCS) && !defined(lint)
+! static char sccsid[] = "@(#)ctime.c	2.0 (2.11BSD) 2019/10/18";
+  #endif LIBC_SCCS and not lint
+  
+! #include <sys/param.h>
+! #include <sys/time.h>
+! #include <tzfile.h>
+! #include <string.h>
+! #include <stdlib.h>
+  
+  char *
+  ctime(t)
+  time_t *t;
+  {
+  	return(asctime(localtime(t)));
+  }
+  
+***************
+*** 48,61 ****
+  	return result;
+  }
+  
+- #ifndef TRUE
+- #define TRUE		1
+- #define FALSE		0
+- #endif /* !TRUE */
+- 
+- extern char *		getenv();
+- extern char *		strcpy();
+- extern char *		strcat();
+  struct tm *		offtime();
+  
+  struct ttinfo {				/* time type information */
+--- 47,52 ----
+***************
+*** 90,98 ****
+  
+  static long
+  detzcode(codep)
+! char *	codep;
+  {
+! 	register long	result;
+  	register int	i;
+  
+  	result = 0;
+--- 81,89 ----
+  
+  static long
+  detzcode(codep)
+! register char *codep;
+  {
+! 	long	result;
+  	register int	i;
+  
+  	result = 0;
+***************
+*** 106,118 ****
+  register char *	name;
+  {
+  	register int	i;
+! 	register int	fid;
+  
+  	if (name == 0 && (name = TZDEFAULT) == 0)
+  		return -1;
+  	{
+! 		register char *	p;
+! 		register int	doaccess;
+  		char		fullname[MAXPATHLEN];
+  
+  		doaccess = name[0] == '/';
+--- 97,109 ----
+  register char *	name;
+  {
+  	register int	i;
+! 	register char *p;
+! 	int	fid;
+  
+  	if (name == 0 && (name = TZDEFAULT) == 0)
+  		return -1;
+  	{
+! 		int	doaccess;
+  		char		fullname[MAXPATHLEN];
+  
+  		doaccess = name[0] == '/';
+***************
+*** 129,135 ****
+  			*/
+  			while (*name != '\0')
+  				if (*name++ == '.')
+! 					doaccess = TRUE;
+  			name = fullname;
+  		}
+  		if (doaccess && access(name, 4) != 0)
+--- 120,126 ----
+  			*/
+  			while (*name != '\0')
+  				if (*name++ == '.')
+! 					doaccess = 1;
+  			name = fullname;
+  		}
+  		if (doaccess && access(name, 4) != 0)
+***************
+*** 138,144 ****
+  			return -1;
+  	}
+  	{
+- 		register char *			p;
+  		register struct tzhead *	tzhp;
+  		char				buf[sizeof s];
+  
+--- 129,134 ----
+***************
+*** 219,245 ****
+  }
+  
+  static
+- tzsetkernel()
+- {
+- 	struct timeval	tv;
+- 	struct timezone	tz;
+- 	char	*tztab();
+- 
+- 	if (gettimeofday(&tv, &tz))
+- 		return -1;
+- 	s.timecnt = 0;		/* UNIX counts *west* of Greenwich */
+- 	s.ttis[0].tt_gmtoff = tz.tz_minuteswest * -SECS_PER_MIN;
+- 	s.ttis[0].tt_abbrind = 0;
+- 	(void)strcpy(s.chars, tztab(tz.tz_minuteswest, 0));
+- 	tzname[0] = tzname[1] = s.chars;
+- #ifdef USG_COMPAT
+- 	timezone = tz.tz_minuteswest * 60;
+- 	daylight = tz.tz_dsttime;
+- #endif /* USG_COMPAT */
+- 	return 0;
+- }
+- 
+- static
+  tzsetgmt()
+  {
+  	s.timecnt = 0;
+--- 209,214 ----
+***************
+*** 258,264 ****
+  {
+  	register char *	name;
+  
+! 	tz_is_set = TRUE;
+  	name = getenv("TZ");
+  	if (!name || *name) {			/* did not request GMT */
+  		if (name && !tzload(name))	/* requested name worked */
+--- 227,233 ----
+  {
+  	register char *	name;
+  
+! 	tz_is_set = 1;
+  	name = getenv("TZ");
+  	if (!name || *name) {			/* did not request GMT */
+  		if (name && !tzload(name))	/* requested name worked */
+***************
+*** 265,272 ****
+  			return;
+  		if (!tzload((char *)0))		/* default name worked */
+  			return;
+- 		if (!tzsetkernel())		/* kernel guess worked */
+- 			return;
+  	}
+  	tzsetgmt();				/* GMT is default */
+  }
+--- 234,239 ----
+***************
+*** 336,345 ****
+  long		offset;
+  {
+  	register struct tm *	tmp;
+! 	register long		days;
+! 	register long		rem;
+! 	register int		y;
+! 	register int		yleap;
+  	register int *		ip;
+  	static struct tm	tm;
+  
+--- 303,310 ----
+  long		offset;
+  {
+  	register struct tm *	tmp;
+! 	long		days, rem;
+! 	register int		y, yleap;
+  	register int *		ip;
+  	static struct tm	tm;
+  
+*** usr/src/man/man1/date.1.old	Mon Mar 30 18:52:13 1987
+--- usr/src/man/man1/date.1	Mon Oct 21 13:23:14 2019
+***************
+*** 2,24 ****
+  .\" All rights reserved.  The Berkeley software License Agreement
+  .\" specifies the terms and conditions for redistribution.
+  .\"
+! .\"	@(#)date.1	6.5 (Berkeley) 3/24/87
+  .\"
+! .TH DATE 1 "March 24, 1987"
+  .UC 4
+  .SH NAME
+  date \- print and set the date
+  .SH SYNOPSIS
+  .B date
+! .RB "[-nu] [-d dst] [-t timezone] [yymmddhhmm [" . "ss] ]"
+  .SH DESCRIPTION
+  If no arguments are given, the current date and time are printed.
+  Providing an argument will set the desired date; only the superuser
+! can set the date.  The \fI-d\fP and \fI-t\fP flags set the kernel's
+! values for daylight savings time and minutes west of GMT.  If \fIdst\fP
+! is non-zero, future calls to \fIgettimeofday\fP(2) will return a non-zero
+! \fItz_dsttime\fP.  \fITimezone\fP provides the number of minutes returned
+! by future calls to \fIgettimeofday\fP(2) in \fItz_minuteswest\fP.  The
+  \fI-u\fP flag is used to display or set the date in GMT (universal) time.
+  .I yy
+  represents the last two digits of the year;
+--- 2,26 ----
+  .\" All rights reserved.  The Berkeley software License Agreement
+  .\" specifies the terms and conditions for redistribution.
+  .\"
+! .\"	@(#)date.1	7.0 (2.11BSD) 2019/10/20
+  .\"
+! .TH DATE 1 "October 20, 2019"
+  .UC 4
+  .SH NAME
+  date \- print and set the date
+  .SH SYNOPSIS
+  .B date
+! .RB "[-nu] [[[[yy]mm]dd]hhmm [" . "ss] ]"
+  .SH DESCRIPTION
+  If no arguments are given, the current date and time are printed.
+  Providing an argument will set the desired date; only the superuser
+! can set the date.
+! .PP
+! The kernel timezone structure is obsolete and is a historic relic. \fPdate(1)\fP
+! \fBno longer\fP updates the kernel timezone structure (daylight savings time 
+! and minutes west of GMT).
+! .PP
+! The
+  \fI-u\fP flag is used to display or set the date in GMT (universal) time.
+  .I yy
+  represents the last two digits of the year;
+*** usr/src/sys/conf/GENERIC.old	Sat Dec 27 19:17:24 2008
+--- usr/src/sys/conf/GENERIC	Fri Oct 18 13:45:18 2019
+***************
+*** 1,3 ****
+--- 1,4 ----
++ # 2019/10/18 - TIMEZONE set to GMT
+  # 1997/1/21 - RK added to GENERIC kernel (for use with Bob Supnik's emulator)
+  # 1995/12/14 - RX added to GENERIC kernel.
+  # 1995/07/21 - XP_PROBE removed.
+***************
+*** 60,71 ****
+  #BOOTDEV	sc21			# Emulex SC21 boot device
+  #BOOTDEV	si			# si 9500 boot device
+  
+! # Timezone, in minutes west of GMT
+! #TIMEZONE	300			# EST
+! #TIMEZONE	360			# CST
+! #TIMEZONE	420			# WST
+! TIMEZONE	480			# PST
+! DST		1			# Daylight Savings Time (1 or 0)
+  
+  # Filesystem configuration
+  # Rootdev, swapdev etc. should be in terms of makedev.  For example,
+--- 61,68 ----
+  #BOOTDEV	sc21			# Emulex SC21 boot device
+  #BOOTDEV	si			# si 9500 boot device
+  
+! # Timezone
+! TIMEZONE	0			# kernel uses GMT by default
+  
+  # Filesystem configuration
+  # Rootdev, swapdev etc. should be in terms of makedev.  For example,
+*** usr/src/sys/conf/config.old	Sun Feb 16 00:37:51 1997
+--- usr/src/sys/conf/config	Fri Oct 18 13:43:15 2019
+***************
+*** 1,6 ****
+--- 1,9 ----
+  #! /bin/sh
+  #	2.11BSD script to set up a new kernel configuration directory.
+  #
++ #       2019/10/18 - the kernel runs on GMT.  The kernel timezone structure
++ #                   is obsolete, will be initialized to 0 now and only 
++ #                   present for historical reference.
+  #	1997/2/14 - LINEHZ removed from localopts.h.  The clock rate is
+  #		    now known in _exactly 1_ place in the kernel (param.c)
+  #		    rather than having references scattered all over the 
+***************
+*** 45,55 ****
+  fi
+  
+  if [ ! "$TIMEZONE" ]; then
+! 	TIMEZONE=480
+  fi
+  
+  if [ ! "$DST" ]; then
+! 	DST=1
+  fi
+  
+  cat << EOF > $LO
+--- 48,58 ----
+  fi
+  
+  if [ ! "$TIMEZONE" ]; then
+! 	TIMEZONE=0
+  fi
+  
+  if [ ! "$DST" ]; then
+! 	DST=0
+  fi
+  
+  cat << EOF > $LO
+*** VERSION.old	Fri Oct 11 12:34:04 2019
+--- VERSION	Mon Oct 21 13:11:02 2019
+***************
+*** 1,5 ****
+! Current Patch Level: 453
+! Date: October 11, 2019
+  
+  2.11 BSD
+  ============
+--- 1,5 ----
+! Current Patch Level: 454
+! Date: October 20, 2019
+  
+  2.11 BSD
+  ============

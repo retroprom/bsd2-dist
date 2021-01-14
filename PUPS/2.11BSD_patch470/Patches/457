@@ -1,0 +1,564 @@
+Subject: tcsh, csh, pascal, timezone, rwhod, mkstr fixes and cleanup
+Index:	 src/ucb/pascal/pi,src/bin/csh,src/bin/tcsh,src/lib/ccom,src/share/zoneinfo,src/usr.sbin/rwhod,src/man/man1/mkstr
+
+Description:
+	1) patch #453 fixed a crash in tcsh caused by passing function pointer
+	   to a different overlay.  In csh the problem exists in the source,
+	   if the overlay arrangement were changed then the crash would occur.
+
+	2) There is a bug in tcsh where a directory name was considered as
+	   quoted (which sets the high order bit in the characters) and 
+	   an opendir() would fail.
+
+	3) running the C compiler test programs would give an error due to
+	   a missing target in the Makefile.
+
+	4) CET timezone not present in the timezone sources processed by
+	   the timezone compiler (zic(8)).  ALSO, the Makefile would
+	   always overwrite /etc/localtime with US/Pacific. 
+
+	5) mkstr man page example error routine is incorrect:
+
+	The example error checks the return value of the lseek and
+	fails if it is less than or equal to 0.  Unfortunately, lseek
+	returns a value of 0 (0L, actually) if one attempts to retrieve
+	the string at offset 0 in the error string file.  This causes
+	the program to fail with an "Undefined error."
+
+	6) rwhod would report incorrect information temporarily after 
+	   a system reboot.
+
+	7)  Pascal compiler output file really isn't "executable not stripped"
+
+	The file program states that the execuable produced by the Berkeley
+	Pascal compiler, pi, is an "executable not stripped," but running
+	nm on it fails with an "out of memory" error. This is because the
+	obj file is really a truncated executable file with Pascal P code
+	tacked on to the end.  It does not really include a useable symbol
+	table.
+
+Repeat-By:
+	1) Observation:  it was noticed that the two files sh.dol.c and 
+	   sh.glob.c in csh implemented the 'here document' in the same
+	   way as tcsh.  The reason csh did not crash is that the functions
+	   involved were both the in the same overlay or base.  However if
+	   the overlay layout were changed in the future the crash would
+	   come out of hiding.
+
+	2) Johnny Billquist spotted this bug in tcsh and provided the patch.
+
+	3) Frank Wortner supplied the description and patch:
+
+	cd /usr/src/lib/ccom/TEST
+	make
+	...
+	Make:  Don't know how to make tst_lgm-g.  Stop.
+
+	4) Johnny Billquist, being in Sweden, added support for the CET
+	   (Central European Time) timezone and removed the overwrite of
+	   /etc/localtime with US/Pacific
+
+	5) Frank Wortner supplied the description and the patch.
+
+	6) Reboot the system and note that 'ruptime'/'rwho' give incorrect
+	   information for up to 30 minutes.
+
+	7) Frank Wortner supplied the description and patch.
+
+	$ cat hello.p
+	program hello(output);
+	begin
+		writeln('Hello, world!');
+		end.
+	$ pi hello.p
+	$ nm obj
+	nm: obj: out of memory
+
+        Update the Makefile to strip the Pascal executable header, since the
+	symbol table is trashed anyway.  The file program will no longer claim
+	that obj is not stripped, and nm will no longer fail with an out of
+	memory error.  The execution of the Pascal program is unaffected.
+
+Fix:
+	For bug #3 nothing needs to be rebuilt or installed.
+
+	Cut where indicated and save to a file (/tmp/457.txt)
+
+	Then:
+
+cd /
+patch -p0 < /tmp/457.txt
+
+strip /usr/share/pascal/npx_header
+
+cd /usr/src/bin/csh
+make
+make install
+make clean
+
+cd /usr/src/bin/tcsh
+make 
+make install
+make clean
+
+cd /usr/src/share/zoneinfo
+make
+make install
+make clean
+
+cd /usr/src/usr.sbin/rwhod
+make
+make install
+make clean
+# if you are running rwhod you may want to kill and re-start it
+
+cd /usr/src/man/man1
+make mkstr.0
+install -c -o bin -g bin -m 444 mkstr.0 /usr/man/cat1
+make clean
+
+	This and previous updates to 2.11BSD are available at the following
+	locations:
+	
+	ftp://ftp.update.uu.se/pub/pdp11/2.11BSD
+	https://www.tuhs.org/Archive/Distributions/UCB/2.11BSD/Patches/
+	ftp://ftp.2bsd.com/2.11BSD
+
+-------------------------------cut here-----------------------
+*** usr/src/ucb/pascal/pi/Makefile.old	Wed Oct 23 18:09:01 1996
+--- usr/src/ucb/pascal/pi/Makefile	Sun Nov 24 10:23:10 2019
+***************
+*** 1,5 ****
+  #
+! # pi Makefile - 1.2.1 1996/10/23
+  #
+  
+  DESTDIR=
+--- 1,5 ----
+  #
+! # pi Makefile - 1.2.2 2019/11/24
+  #
+  
+  DESTDIR=
+***************
+*** 65,70 ****
+--- 65,71 ----
+  
+  px_header.out: px_header.c
+  	${CC} ${CFLAGS} ${DEFS} -o px_header.out px_header.c
++ 	strip px_header.out
+  
+  pi: ${OBJS} version
+  	-if [ X${SEPFLAG} = X-i ]; then \
+*** usr/src/bin/csh/sh.glob.c.old	Fri Sep 20 03:34:49 1996
+--- usr/src/bin/csh/sh.glob.c	Tue Nov 19 21:46:42 2019
+***************
+*** 5,11 ****
+   */
+  
+  #if	!defined(lint) && defined(DOSCCS)
+! static char *sccsid = "@(#)sh.glob.c	5.4.1 (2.11BSD) 1996/9/20";
+  #endif
+  
+  #include "sh.h"
+--- 5,11 ----
+   */
+  
+  #if	!defined(lint) && defined(DOSCCS)
+! static char *sccsid = "@(#)sh.glob.c	5.5 (2.11BSD) 2019/11/19";
+  #endif
+  
+  #include "sh.h"
+***************
+*** 474,490 ****
+  		error("Pathname too long");
+  	*gpathp++ = c & TRIM;
+  	*gpathp = 0;
+- }
+- 
+- rscan(t, f)
+- 	register char **t;
+- 	int (*f)();
+- {
+- 	register char *p;
+- 
+- 	while (p = *t++)
+- 		while (*p)
+- 			(*f)(*p++);
+  }
+  
+  trim(t)
+--- 474,479 ----
+*** usr/src/bin/csh/sh.dol.c.old	Sat Aug 31 02:05:59 1991
+--- usr/src/bin/csh/sh.dol.c	Tue Nov 19 21:46:23 2019
+***************
+*** 5,11 ****
+   */
+  
+  #if	!defined(lint) && defined(DOSCCS)
+! static char *sccsid = "@(#)sh.dol.c	5.3 (Berkeley) 3/29/86";
+  #endif
+  
+  #include "sh.h"
+--- 5,11 ----
+   */
+  
+  #if	!defined(lint) && defined(DOSCCS)
+! static char *sccsid = "@(#)sh.dol.c	5.4 (2.11BSD) 2019/11/19";
+  #endif
+  
+  #include "sh.h"
+***************
+*** 548,559 ****
+  	return (' ');
+  }
+  
+! Dtestq(c)
+! 	register int c;
+  {
+  
+! 	if (cmap(c, QUOTES))
+! 		gflag = 1;
+  }
+  
+  /*
+--- 548,567 ----
+  	return (' ');
+  }
+  
+! static void
+! rscan(t)
+! 	register char **t;
+  {
++ 	register char *p, c;
+  
+! 	while (p = *t++)
+! 	      {
+! 	      while (c = *p++)
+! 		    {
+! 		    if (cmap(c, QUOTES))
+! 		       gflag = 1;
+! 		    }
+! 	       }
+  }
+  
+  /*
+***************
+*** 584,590 ****
+  	}
+  	(void) unlink(shtemp);			/* 0 0 inode! */
+  	Dv[0] = term; Dv[1] = NOSTR; gflag = 0;
+! 	trim(Dv); rscan(Dv, Dtestq); quoted = gflag;
+  	ocnt = BUFSIZ; obp = obuf;
+  	for (;;) {
+  		/*
+--- 592,598 ----
+  	}
+  	(void) unlink(shtemp);			/* 0 0 inode! */
+  	Dv[0] = term; Dv[1] = NOSTR; gflag = 0;
+! 	trim(Dv); rscan(Dv); quoted = gflag;
+  	ocnt = BUFSIZ; obp = obuf;
+  	for (;;) {
+  		/*
+*** usr/src/bin/tcsh/tw.parse.c.old	Wed Aug 21 13:07:01 1991
+--- usr/src/bin/tcsh/tw.parse.c	Sat Nov 23 13:38:40 2019
+***************
+*** 1,4 ****
+! /* $Header: /home/hyperion/mu/christos/src/sys/tcsh-6.00/RCS/tw.parse.c,v 3.0 1991/07/04 21:49:28 christos Exp $ */
+  /*
+   * tw.parse.c: Everyone has taken a shot in this futile effort to
+   *	       lexically analyze a csh line... Well we cannot good
+--- 1,4 ----
+! /* $Header: $ */
+  /*
+   * tw.parse.c: Everyone has taken a shot in this futile effort to
+   *	       lexically analyze a csh line... Well we cannot good
+***************
+*** 40,46 ****
+  #include "config.h"
+  #if !defined(lint) && !defined(pdp11)
+  static char *rcsid() 
+!     { return "$Id: tw.parse.c,v 3.0 1991/07/04 21:49:28 christos Exp $"; }
+  #endif
+  
+  #include "sh.h"
+--- 40,46 ----
+  #include "config.h"
+  #if !defined(lint) && !defined(pdp11)
+  static char *rcsid() 
+!     { return "$Id: tw.parse.c,v 3.1 2019/11/21 19:12:00 bqt Exp $"; }
+  #endif
+  
+  #include "sh.h"
+***************
+*** 416,421 ****
+--- 416,431 ----
+      return (buffer);
+  }
+  
++ char * unquote(s)
++   char *s;
++ {
++   char *p = s;
++   while (*p) {
++     *p &= TRIM;
++     ++p;
++   }
++   return s;
++ }
+  
+  /*
+   * return true if check items initial chars in template
+***************
+*** 667,673 ****
+  	if ((dollar(dollar_dir, dir) == 0) ||
+  	    (tilde(tilded_dir, dollar_dir) == 0) ||
+  	    !(nd = dnormalize(*tilded_dir ? tilded_dir : STRdot)) ||
+! 	    ((dir_fd = opendir(short2str(nd))) == NULL)) {
+  	    xfree((ptr_t) nd);
+  	    if (SearchNoDirErr)
+  		return (-2);
+--- 677,683 ----
+  	if ((dollar(dollar_dir, dir) == 0) ||
+  	    (tilde(tilded_dir, dollar_dir) == 0) ||
+  	    !(nd = dnormalize(*tilded_dir ? tilded_dir : STRdot)) ||
+! 	    ((dir_fd = opendir(unquote(short2str(nd)))) == NULL)) {
+  	    xfree((ptr_t) nd);
+  	    if (SearchNoDirErr)
+  		return (-2);
+*** usr/src/lib/ccom/TEST/Makefile.old	Mon Jan 18 10:47:50 1993
+--- usr/src/lib/ccom/TEST/Makefile	Sat Nov 23 09:04:45 2019
+***************
+*** 32,37 ****
+--- 32,40 ----
+  tst_lgm: tst_lgm.o
+  	${CC} -o $@ tst_lgm.o
+  
++ tst_lgm-g: tst_lgm-g.o
++ 	${CC} -o $@ tst_lgm-g.o
++ 
+  # This will fail... see README
+  #tst_lgmgood: tst_lgmgood.o
+  #	${CC} -o $@ tst_lgmgood.o
+*** usr/src/share/zoneinfo/Makefile.old	Tue Oct 29 07:57:00 2019
+--- usr/src/share/zoneinfo/Makefile	Sat Nov 23 13:38:38 2019
+***************
+*** 1,15 ****
+! # @(#)Makefile	1.7 Makefile (2.11BSD) 2019/10/29
+  
+  DESTDIR=
+  
+- # If you want something other than Western United States time used on your
+- # system, change the line below (after finding the zone you want in the
+- # time zone files, or adding it to a time zone file).
+- # Alternately, if you discover you've got the wrong time zone, you can just
+- #	install -c -m 444 /usr/share/zoneinfo/right_zone /etc/localtime
+- 
+- LOCALTIME=	US/Pacific
+- 
+  # If you want code inspired by certain emerging standards, add
+  #	-DSTD_INSPIRED
+  # to the end of the "CFLAGS=" line.
+--- 1,7 ----
+! # @(#)Makefile	1.8 Makefile (2.11BSD) 2019/11/21
+  
+  DESTDIR=
+  
+  # If you want code inspired by certain emerging standards, add
+  #	-DSTD_INSPIRED
+  # to the end of the "CFLAGS=" line.
+***************
+*** 43,49 ****
+  
+  install:	zic $(DATA) $(MAN)
+  		(umask 22; ./zic -d ${SHARDIR} $(DATA))
+- 		install -c -m 444 -o bin -g bin ${SHARDIR}/${LOCALTIME} ${DESTDIR}/etc/localtime
+  		install -c -m 444 -o bin -g bin $(ZICMAN) ${MANDIR}/${ZICMAN}
+  		install -c -m 444 -o bin -g bin $(ZDUMAN) ${MANDIR}/${ZDUMAN}
+  		install -c -s -m 755 -o bin -g bin zic ${DESTDIR}/usr/sbin/zic
+--- 35,40 ----
+*** usr/src/share/zoneinfo/europe.old	Mon Mar 30 19:13:39 1987
+--- usr/src/share/zoneinfo/europe	Sat Nov 23 13:38:38 2019
+***************
+*** 1,4 ****
+! # @(#)europe	3.1
+  
+  # Europe, updated from 4.3BSD and various contributors
+  # International country codes are used to identify countries' rules and
+--- 1,4 ----
+! # @(#)europe	3.2
+  
+  # Europe, updated from 4.3BSD and various contributors
+  # International country codes are used to identify countries' rules and
+***************
+*** 27,34 ****
+  Rule	W-Eur	1986	max	-	Mar	lastSun	1:00s	1:00	" DST"
+  Rule	W-Eur	1986	max	-	Sep	lastSun	1:00s	0	-
+  
+! Rule	M-Eur	1986	max	-	Mar	lastSun	2:00s	1:00	" DST"
+! Rule	M-Eur	1986	max	-	Sep	lastSun	2:00s	0	-
+  
+  Rule	E-Eur	1986	max	-	Mar	lastSun	3:00s	1:00	" DST"
+  Rule	E-Eur	1986	max	-	Sep	lastSun	3:00s	0	-
+--- 27,35 ----
+  Rule	W-Eur	1986	max	-	Mar	lastSun	1:00s	1:00	" DST"
+  Rule	W-Eur	1986	max	-	Sep	lastSun	1:00s	0	-
+  
+! Rule	C-Eur	1986	max	-	Mar	lastSun	2:00s	1:00	S
+! Rule	C-Eur	1986	1995	-	Sep	lastSun	2:00s	0	-
+! Rule	C-Eur	1996	max	-	Oct	lastSun	2:00s	0	-
+  
+  Rule	E-Eur	1986	max	-	Mar	lastSun	3:00s	1:00	" DST"
+  Rule	E-Eur	1986	max	-	Sep	lastSun	3:00s	0	-
+***************
+*** 43,57 ****
+  Zone	GB-Eire		0:00	GB-Eire		%s
+  Zone	WET		0:00	W-Eur		WET%s
+  Zone	Iceland		0:00	-		WET
+! Zone	MET		1:00	M-Eur		MET%s
+  Zone	Poland		1:00	W-Eur		MET%s
+  Zone	EET		2:00	E-Eur		EET%s
+  Zone	Turkey		3:00	Turkey		EET%s
+! Zone	W-SU		3:00	M-Eur		????
+  
+! # Tom Hoffman says that MET is also known as Central European Time
+  
+! Link	MET	CET
+  
+  #
+  # And now, letters on the subject. . .
+--- 44,58 ----
+  Zone	GB-Eire		0:00	GB-Eire		%s
+  Zone	WET		0:00	W-Eur		WET%s
+  Zone	Iceland		0:00	-		WET
+! Zone	CET		1:00	C-Eur		CE%sT
+  Zone	Poland		1:00	W-Eur		MET%s
+  Zone	EET		2:00	E-Eur		EET%s
+  Zone	Turkey		3:00	Turkey		EET%s
+! Zone	W-SU		3:00	C-Eur		????
+  
+! # MET is an alternative name for CET
+  
+! Link	CET	MET
+  
+  #
+  # And now, letters on the subject. . .
+***************
+*** 123,125 ****
+--- 124,135 ----
+  # dik t. winter, cwi, amsterdam, nederland
+  # INTERNET   : dik@cwi.nl
+  # BITNET/EARN: dik@mcvax
++ #
++ ####################################################################
++ #
++ # Date: 21-Nov-2019
++ #
++ # This file have been updated with the current state for CET,
++ # extracted from zonefiles for NetBSD.
++ #
++ # Johnny Billquist (bqt@softjar.se)
+*** usr/src/usr.sbin/rwhod/rwhod.c.old	Sun Feb 13 12:44:08 2000
+--- usr/src/usr.sbin/rwhod/rwhod.c	Sat Nov 23 13:38:38 2019
+***************
+*** 9,15 ****
+  "@(#) Copyright (c) 1983 Regents of the University of California.\n\
+   All rights reserved.\n";
+  
+! static char sccsid[] = "@(#)rwhod.c	5.9.3 (2.11BSD) 1999/9/14";
+  #endif
+  
+  #include <sys/param.h>
+--- 9,15 ----
+  "@(#) Copyright (c) 1983 Regents of the University of California.\n\
+   All rights reserved.\n";
+  
+! static char sccsid[] = "@(#)rwhod.c	5.9.4 (2.11BSD) 2019/11/21";
+  #endif
+  
+  #include <sys/param.h>
+***************
+*** 117,123 ****
+  	}
+  	if ((cp = index(myname, '.')) != NULL)
+  		*cp = '\0';
+! 	strncpy(mywd.wd_hostname, myname, sizeof (myname) - 1);
+  	utmpf = open(Utmp, O_RDONLY);
+  	if (utmpf < 0) {
+  		(void) close(creat(Utmp, 0644));
+--- 117,123 ----
+  	}
+  	if ((cp = index(myname, '.')) != NULL)
+  		*cp = '\0';
+! 	strncpy(mywd.wd_hostname, myname, sizeof (mywd.wd_hostname) - 1);
+  	utmpf = open(Utmp, O_RDONLY);
+  	if (utmpf < 0) {
+  		(void) close(creat(Utmp, 0644));
+***************
+*** 232,238 ****
+  int	utmpent;
+  int	utmpsize = 0;
+  struct	utmp *utmp;
+! int	alarmcount;
+  
+  onalrm()
+  {
+--- 232,238 ----
+  int	utmpent;
+  int	utmpsize = 0;
+  struct	utmp *utmp;
+! int	alarmcount=9;
+  
+  onalrm()
+  {
+*** usr/src/man/man1/mkstr.1.old	Tue Dec  4 22:27:41 2001
+--- usr/src/man/man1/mkstr.1	Mon Nov 25 00:29:18 2019
+***************
+*** 2,8 ****
+  .\" All rights reserved.  The Berkeley software License Agreement
+  .\" specifies the terms and conditions for redistribution.
+  .\"
+! .\"	@(#)mkstr.1	6.2.1 (2.11BSD) 1996/10/22
+  .\"
+  .TH MKSTR 1 "October 22, 1996"
+  .UC
+--- 2,8 ----
+  .\" All rights reserved.  The Berkeley software License Agreement
+  .\" specifies the terms and conditions for redistribution.
+  .\"
+! .\"	@(#)mkstr.1	6.2.2 (2.11BSD) 2019/11/25
+  .\"
+  .TH MKSTR 1 "October 22, 1996"
+  .UC
+***************
+*** 74,80 ****
+  			exit(1);
+  		}
+  	}
+! 	\fBif\fR (lseek(efil, (long) a1, 0) <= 0 |\||
+  	    read(efil, buf, 256) <= 0)
+  		\fBgoto\fR oops;
+  	printf(buf, a2, a3, a4);
+--- 74,80 ----
+  			exit(1);
+  		}
+  	}
+! 	\fBif\fR (lseek(efil, (long) a1, 0) < 0 |\||
+  	    read(efil, buf, 256) <= 0)
+  		\fBgoto\fR oops;
+  	printf(buf, a2, a3, a4);
+*** VERSION.old	Mon Nov 18 07:53:08 2019
+--- VERSION	Sat Nov 23 08:52:43 2019
+***************
+*** 1,5 ****
+! Current Patch Level: 456
+! Date: November 18, 2019
+  
+  2.11 BSD
+  ============
+--- 1,5 ----
+! Current Patch Level: 457
+! Date: November 25, 2019
+  
+  2.11 BSD
+  ============
