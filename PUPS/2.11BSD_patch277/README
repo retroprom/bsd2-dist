@@ -1,0 +1,48 @@
+	The format of a 2.11BSD boot tape is:
+
+	File	Block		Content
+	 #	 Size
+	----	-----		-------
+	 0	512		bootblock,bootblock,boot
+	 1	1024		disklabel
+	 2	1024		mkfs
+	 3	1024		restor
+	 4	1024		icheck
+	 5	10240		root.dump
+	 6	10240		tape1.tar1
+	 7	10240		tape1.tar2
+	 8	10240		tape2.tar1
+
+	 The complete kit will fit on a TK50 (barely) or a 6250BPI 9-track.
+	 Obviously a DAT (4mm) or 8mm tape will have no problem.
+
+	 For TK25 or 1600BPI 9-track files 0 thru 7 go on volume 1 and
+	 file 8 goes on a second volume by itself (it barely fits, be sure
+	 you don't have a tape that's short of being a 2400' reel).
+
+	 You can either use the 'maketape' program to write files 0 thru 4
+	 on the tape or use a series of 'dd' commands.
+
+	 To use 'maketape':
+
+		cc -o maketape maketape.c
+		./maketape /dev/nrmt0 maketape.data
+		dd if=root.dump of=/dev/nrmt0 bs=10240c
+		dd if=tape1.tar1 of=/dev/nrmt0 bs=10240c
+		dd if=tape1.tar2 of=/dev/nrmt0 bs=10240c
+		dd if=tape2.tar of=/dev/rmt0 bs=10240c
+
+	Using only 'dd':
+
+		cat mtboot mtboot boot | dd of=/dev/nrmt0 obs=512 conv=osync
+		foreach i (disklabel mkfs restor icheck)
+		  dd if=${i} of=/dev/nrmt0 obs=1024 conv=osync
+		end
+		dd if=root.dump of=/dev/nrmt0 bs=10240c
+		dd if=tape1.tar1 of=/dev/nrmt0 bs=10240c
+		dd if=tape1.tar2 of=/dev/nrmt0 bs=10240c
+		dd if=tape2.tar of=/dev/rmt0 bs=10240c
+
+	The setup and installation documents are in the files 'setup.ascii'
+	and 'setup.ps'.  The first file is plain ASCII text while the second
+	is postscript suitable for sending to a laser printer or ghostview.
