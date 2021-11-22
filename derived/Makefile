@@ -40,17 +40,19 @@ DISTRIBUTE+=${PL431_MINITAPE} ${PL431_BASETAPE} ${PL431_FULLTAPE}
 COMPRESSED+=$(DISTRIBUTE:%=%.gz)
 
 default: distribute
+.PHONY: default
 
 distribute: ${DISTRIBUTE}
 	gzip -k ${DISTRIBUTE}
 	sha256sum ${DISTRIBUTE} > SHA256SUMS
 	sha512sum ${DISTRIBUTE} > SHA512SUMS
+.PHONY: distribute
 
 clean:
 	rm -f mksimtape ${DISTRIBUTE} ${COMPRESSED} ${PL431_TAPEBOOT}
+.PHONY: clean
 
-main: mksimtape
-
+# conversion tool from simtools
 mksimtape: mksimtape.c
 
 # PL431 distribution
@@ -60,15 +62,17 @@ ${PL431_TAPEBOOT}:
 	dd obs=512 seek=1 count=1 if=${PL431}/mtboot of=${PL431_TAPEBOOT}.tmp
 	dd obs=512 seek=2 if=${PL431}/boot of=${PL431_TAPEBOOT}.tmp
 	mv ${PL431_TAPEBOOT}.tmp ${PL431_TAPEBOOT}
-${PL431_MINITAPE}: mksimtape ${PL431_TAPEBOOT}
+${PL431_MINITAPE}: extract mksimtape ${PL431_TAPEBOOT}
 	./mksimtape ${PL431_MINISPEC} > $@
-${PL431_BASETAPE}: mksimtape ${PL431_TAPEBOOT}
+${PL431_BASETAPE}: extract mksimtape ${PL431_TAPEBOOT}
 	./mksimtape ${PL431_BASESPEC} > $@
-${PL431_FULLTAPE}: mksimtape ${PL431_TAPEBOOT}
+${PL431_FULLTAPE}: extract mksimtape ${PL431_TAPEBOOT}
 	./mksimtape ${PL431_FULLSPEC} > $@
 
 # file extraction
 extract: ${EXTRACT}
+.PHONY: extract
+
 ${PL431}/file6.tar: ${PL431}/file6.tar.gz
 	gunzip -k $<
 ${PL431}/file7.tar: ${PL431}/file7.tar.gz
