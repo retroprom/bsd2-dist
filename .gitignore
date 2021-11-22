@@ -3,3 +3,18 @@
 *~
 # Mirror files
 index.html*
+# Files that we derive
+PUPS/2.11BSD_patch470/file6.tar
+PUPS/2.11BSD_patch470/file7.tar
+PUPS/2.11BSD_patch470/file8.tar
+derived/SHA256SUMS
+derived/SHA512SUMS
+derived/bsd211-patch431-dist-base.tap
+derived/bsd211-patch431-dist-base.tap.gz
+derived/bsd211-patch431-dist-full.tap
+derived/bsd211-patch431-dist-full.tap.gz
+derived/bsd211-patch431-dist-mini.tap
+derived/bsd211-patch431-dist-mini.tap.gz
+derived/bsd211-patch431-tapeboot.bin
+derived/mksimtape
+
